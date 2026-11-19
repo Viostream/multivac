@@ -509,12 +509,21 @@ async function fetchEnv(env, app) {
     // inactive = GitHub auto-marked previous deployment superseded — skip it, look for success
     const success = statuses.find(s => s.state === "success");
     if (success) {
+      // Get triggering actor from the run (deployment creator is always github-actions[bot])
+      let who = d.creator?.login || "?";
+      const runMatch = success.log_url?.match(/runs\/(\d+)/);
+      if (runMatch) {
+        try {
+          const run = await ghGet(`repos/${REPO}/actions/runs/${runMatch[1]}`);
+          who = run.triggering_actor?.login || run.actor?.login || who;
+        } catch {}
+      }
       return {
         sha:     d.sha,
         sha7:    d.sha.slice(0, 7),
         ref:     d.ref,
         when:    d.created_at,
-        who:     d.creator?.login || "?",
+        who,
         state:   "success",
         version: success.description?.trim() || null,
         log_url: success.log_url || "",
