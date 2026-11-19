@@ -676,10 +676,13 @@ async function load() {
     ]);
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
     pendingDevMap  = devPending.status  === "fulfilled" ? devPending.value  : {};
-    // Build sha->version map from recent tags for pending approval display
+    // Build sha->version map from recent tags
+    // Exclude sprint boundary tags (patch == 0, e.g. v2026.21.0) — those are markers not builds
     const tags = await ghGet(`repos/${REPO}/tags?per_page=20`);
     window._tagMap = {};
-    for (const t of tags) window._tagMap[t.commit.sha.slice(0, 7)] = t.name;
+    for (const t of [...tags].reverse()) {
+      if (!t.name.match(/^v\d+\.\d+\.0$/)) window._tagMap[t.commit.sha.slice(0, 7)] = t.name;
+    }
 
     appData = await Promise.all(
       APPS.map(async app => ({
