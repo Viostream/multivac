@@ -348,27 +348,35 @@ function badgeClass(state) {
   return "badge-none";
 }
 
-// Returns pending approval run_id for a given app+env, or null
-async function fetchPendingApproval(env, workflow) {
-  // Find recent deployments with task=deploy (auto-created by environment: block)
-  // that have a waiting status, then check if the run matches this app's workflow
-  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
-  for (const d of deployments) {
-    const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
-    const s = statuses[0];
-    if (!s || s.state !== "waiting") continue;
-    // Extract run ID from log_url
-    const match = s.log_url?.match(/runs\/(\d+)/);
-    if (!match) continue;
-    const runId = match[1];
-    try {
-      const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
-      if (run.path === `.github/workflows/${workflow}`) {
-        return runId;
-      }
-    } catch { continue; }
-  }
-  return null;
+// Fetch all pending approvals for an env in one pass.
+// Returns a map of workflow filename -> run_id
+async function fetchAllPendingApprovals(env) {
+  const map = {};
+  try {
+    const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
+    // Only check recent ones - parallel fetch statuses
+    const withStatuses = await Promise.all(
+      deployments.map(async d => {
+        const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
+        return { d, status: statuses[0] };
+      })
+    );
+    const waiting = withStatuses.filter(({ status }) => status?.state === "waiting");
+    // Fetch run info for each waiting deployment in parallel
+    await Promise.all(
+      waiting.map(async ({ status }) => {
+        const match = status.log_url?.match(/runs\/(\d+)/);
+        if (!match) return;
+        const runId = match[1];
+        try {
+          const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
+          const wf = run.path?.replace(".github/workflows/", "");
+          if (wf) map[wf] = runId;
+        } catch {}
+      })
+    );
+  } catch {}
+  return map;
 }
 
 async function approvePendingDeployment(runId) {
@@ -511,17 +519,20 @@ async function load() {
 
   document.getElementById("last-updated").textContent = "Loading…";
 
-  // Fetch per-app per-env in parallel — 24 requests (12 apps × 2 envs)
-  // Also fetch pending prod approvals per app in parallel
-  let appData;
+  // Fetch pending approvals once per env, then per-app/env data in parallel
+  let appData, pendingProdMap, pendingDevMap;
   try {
+    [pendingProdMap, pendingDevMap] = await Promise.all([
+      fetchAllPendingApprovals("prod"),
+      fetchAllPendingApprovals("dev1"),
+    ]);
     appData = await Promise.all(
       APPS.map(async app => ({
         app,
         dev1:        await fetchEnv("dev1", app.app),
         prod:        await fetchEnv("prod", app.app),
-        pendingProd: await fetchPendingApproval("prod", app.workflow),
-        pendingDev:  await fetchPendingApproval("dev1", app.workflow),
+        pendingProd: pendingProdMap[app.workflow] || null,
+        pendingDev:  pendingDevMap[app.workflow]  || null,
       }))
     );
   } catch (err) {
