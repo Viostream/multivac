@@ -296,7 +296,11 @@ let currentDeployBranch = "main";
 function getToken() { return localStorage.getItem("gh_token") || ""; }
 
 function resetToken() {
-  const t = prompt("GitHub PAT (classic, repo scope):");
+  const t = prompt(
+      "GitHub PAT (classic) with scopes: repo, workflow\n\n" +
+      "Create one at: https://github.com/settings/tokens/new?scopes=repo,workflow\n\n" +
+      "If you already have a token, edit it at https://github.com/settings/tokens and tick 'workflow'."
+    );
   if (t) { localStorage.setItem("gh_token", t.trim()); load(); }
 }
 
