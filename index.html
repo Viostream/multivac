@@ -346,6 +346,7 @@ async function fetchEnv(env, app) {
 
   for (const d of deployments) {
     const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=10`);
+    // inactive = GitHub auto-marked previous deployment superseded — skip it, look for success
     const success = statuses.find(s => s.state === "success");
     if (success) {
       return {
