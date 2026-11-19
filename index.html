@@ -115,6 +115,8 @@
     .badge-success { background: #1a4a1a; color: #3fb950; border: 1px solid #238636; }
     .badge-failure { background: #4a1a1a; color: #f85149; border: 1px solid #da3633; }
     .badge-pending { background: #2a2a1a; color: #d29922; border: 1px solid #9e6a03; }
+    .badge-waiting { background: #2a1f00; color: #e3b341; border: 1px solid #bb8009; cursor: pointer; }
+    .badge-waiting:hover { background: #bb8009; color: #fff; }
     .badge-none    { background: #161b22; color: #484f58; border: 1px solid #30363d; }
 
     .meta { display: block; font-size: 0.7rem; color: #8b949e; margin-top: 2px; }
@@ -244,7 +246,18 @@
 
 <div id="content"><p class="loading">Loading…</p></div>
 
-<!-- confirm modal -->
+<!-- approve modal -->
+<div class="modal-backdrop" id="approve-modal">
+  <div class="modal">
+    <h2 id="approve-title">Approve deployment</h2>
+    <p id="approve-desc"></p>
+    <div class="dispatch-status" id="approve-status"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeApproveModal()">Cancel</button>
+      <button class="btn-confirm" id="approve-btn" onclick="confirmApprove()">Approve</button>
+    </div>
+  </div>
+</div>
 <div class="modal-backdrop" id="modal">
   <div class="modal">
     <h2 id="modal-title">Deploy to Dev</h2>
@@ -333,6 +346,42 @@ function badgeClass(state) {
   if (state === "failure" || state === "error") return "badge-failure";
   if (["in_progress","pending","waiting","queued"].includes(state)) return "badge-pending";
   return "badge-none";
+}
+
+// Returns pending approval run_id for a given app+env, or null
+async function fetchPendingApproval(env, workflow) {
+  // Find recent deployments with task=deploy (auto-created by environment: block)
+  // that have a waiting status, then check if the run matches this app's workflow
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
+  for (const d of deployments) {
+    const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
+    const s = statuses[0];
+    if (!s || s.state !== "waiting") continue;
+    // Extract run ID from log_url
+    const match = s.log_url?.match(/runs\/(\d+)/);
+    if (!match) continue;
+    const runId = match[1];
+    try {
+      const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
+      if (run.path === `.github/workflows/${workflow}`) {
+        return runId;
+      }
+    } catch { continue; }
+  }
+  return null;
+}
+
+async function approvePendingDeployment(runId) {
+  return fetch(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/pending_deployments`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${getToken()}`,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ environment_names: ["prod"], state: "approved", comment: "Approved via Multivac" }),
+  }).then(r => { if (!r.ok) throw new Error(r.status); });
 }
 
 async function fetchEnv(env, app) {
@@ -425,7 +474,20 @@ async function loadBranches() {
   }
 }
 
-function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl) {
+function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, appName) {
+  if (!d && !pendingRunId) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
+
+  // Pending approval — amber, clickable to approve
+  if (pendingRunId) {
+    const label = d ? (d.version || d.sha7) : "pending";
+    return `
+      <td class="cell">
+        <span class="version-badge badge-waiting" onclick="openApproveModal('${pendingRunId}','${appName}','${env}')"
+          title="Pending approval — click to approve prod deploy">⏳ ${label}</span>
+        <span class="meta">waiting for approval</span>
+      </td>`;
+  }
+
   if (!d) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
 
   const version  = d.version || d.sha7;
@@ -450,13 +512,16 @@ async function load() {
   document.getElementById("last-updated").textContent = "Loading…";
 
   // Fetch per-app per-env in parallel — 24 requests (12 apps × 2 envs)
+  // Also fetch pending prod approvals per app in parallel
   let appData;
   try {
     appData = await Promise.all(
       APPS.map(async app => ({
         app,
-        dev1: await fetchEnv("dev1", app.app),
-        prod: await fetchEnv("prod", app.app),
+        dev1:        await fetchEnv("dev1", app.app),
+        prod:        await fetchEnv("prod", app.app),
+        pendingProd: await fetchPendingApproval("prod", app.workflow),
+        pendingDev:  await fetchPendingApproval("dev1", app.workflow),
       }))
     );
   } catch (err) {
@@ -476,16 +541,15 @@ async function load() {
     devProdAhead > 0 ? "inline-block" : "none";
 
   let rows = "";
-  for (const { app, dev1, prod } of appData) {
+  for (const { app, dev1, prod, pendingProd, pendingDev } of appData) {
     const redeploy = `https://github.com/${REPO}/actions/workflows/${app.workflow}`;
-    // Per-app ahead count: compare this app's specific SHAs
     const appAhead = dev1 && prod && dev1.sha !== prod.sha
       ? await aheadBy(prod.sha, dev1.sha) : 0;
     const appDiff = appAhead > 0 && dev1 && prod
       ? `https://github.com/${REPO}/compare/${prod.sha}...${dev1.sha}` : "";
     rows += `<tr><td class="app-name">${app.name}</td>`;
-    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy);
-    rows += renderEnvCell(prod, "prod", 0,        "",      redeploy);
+    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, pendingDev,  app.name);
+    rows += renderEnvCell(prod, "prod", 0,        "",      redeploy, pendingProd, app.name);
     rows += `</tr>`;
   }
 
@@ -505,7 +569,47 @@ async function load() {
     `Updated ${new Date().toLocaleTimeString()}`;
 }
 
-// ── modal ──
+// ── approve modal ──
+
+let currentApproveRunId = null;
+
+function openApproveModal(runId, appName, env) {
+  currentApproveRunId = runId;
+  document.getElementById("approve-title").textContent = `Approve ${env} deploy — ${appName}`;
+  document.getElementById("approve-desc").textContent =
+    `This will approve the pending ${env} deployment for ${appName} (run #${runId}).`;
+  document.getElementById("approve-status").innerHTML = "";
+  document.getElementById("approve-btn").disabled = false;
+  document.getElementById("approve-btn").textContent = "Approve";
+  document.getElementById("approve-modal").classList.add("open");
+}
+
+function closeApproveModal() {
+  document.getElementById("approve-modal").classList.remove("open");
+}
+
+async function confirmApprove() {
+  const btn = document.getElementById("approve-btn");
+  const statusEl = document.getElementById("approve-status");
+  btn.disabled = true;
+  btn.textContent = "Approving…";
+  try {
+    await approvePendingDeployment(currentApproveRunId);
+    statusEl.innerHTML = `<span class="ok">✓ Approved — deployment will start shortly</span>`;
+    btn.textContent = "Done";
+    setTimeout(() => { closeApproveModal(); load(); }, 2000);
+  } catch (e) {
+    statusEl.innerHTML = `<span class="err">✗ Failed: ${e.message}</span>`;
+    btn.disabled = false;
+    btn.textContent = "Approve";
+  }
+}
+
+document.getElementById("approve-modal").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeApproveModal();
+});
+
+// ── deploy modal ──
 
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
