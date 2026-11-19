@@ -350,6 +350,7 @@
 <script>
 const REPO = "Viostream/viostream";
 const ENVS = ["dev1", "prod"];
+const ENV_IDS = { dev1: 4183922127, prod: 4183923335 };
 
 const APPS = [
   { name: "Admin",      app: "viostream-admin-web",         workflow: "admin.yml",      paths: ["src/Admin/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/Console/Viostream.Console.Messages/", ".github/workflows/admin.yml"] },
@@ -470,13 +471,14 @@ async function fetchAllPendingApprovals(env) {
       const runId = match[1];
       const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
       const wf = run.path?.replace(".github/workflows/", "");
-      if (wf) map[wf] = runId;
+      // store {runId, sha} so we can show the version in the approve modal
+      if (wf) map[wf] = { runId, sha: d.sha.slice(0, 7) };
     })
   );
   return map;
 }
 
-async function approvePendingDeployment(runId) {
+async function approvePendingDeployment(runId, env) {
   return fetch(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/pending_deployments`, {
     method: "POST",
     headers: {
@@ -485,7 +487,11 @@ async function approvePendingDeployment(runId) {
       "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ environment_names: ["prod"], state: "approved", comment: "Approved via Multivac" }),
+    body: JSON.stringify({
+      environment_ids: [ENV_IDS[env]],
+      state: "approved",
+      comment: "Approved via Multivac",
+    }),
   }).then(r => { if (!r.ok) throw new Error(r.status); });
 }
 
@@ -584,11 +590,17 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 
   // Pending approval — amber, clickable to approve
   if (pendingRunId) {
-    const label = d ? (d.version || d.sha7) : "pending";
+    const { runId, sha } = pendingRunId;
+    // Find version for this SHA from the tags cache (populated during load)
+    const version = window._tagMap?.[sha] || sha;
+    const label = `⏳ ${version}`;
     return `
       <td class="cell">
-        <span class="version-badge badge-waiting" onclick="openApproveModal('${pendingRunId}','${appName}','${env}')"
-          title="Pending approval — click to approve prod deploy">⏳ ${label}</span>
+        <span class="version-badge badge-waiting"
+          onclick="openApproveModal('${runId}','${appName}','${env}','${version}')"
+          title="Pending approval — click to approve">
+          ${label}
+        </span>
         <span class="meta">waiting for approval</span>
       </td>`;
   }
@@ -625,6 +637,11 @@ async function load() {
     ]);
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
     pendingDevMap  = devPending.status  === "fulfilled" ? devPending.value  : {};
+    // Build sha->version map from recent tags for pending approval display
+    const tags = await ghGet(`repos/${REPO}/tags?per_page=20`);
+    window._tagMap = {};
+    for (const t of tags) window._tagMap[t.commit.sha.slice(0, 7)] = t.name;
+
     appData = await Promise.all(
       APPS.map(async app => ({
         app,
@@ -682,12 +699,16 @@ async function load() {
 // ── approve modal ──
 
 let currentApproveRunId = null;
+let currentApproveEnv   = null;
 
-function openApproveModal(runId, appName, env) {
+function openApproveModal(runId, appName, env, version) {
   currentApproveRunId = runId;
-  document.getElementById("approve-title").textContent = `Approve ${env} deploy — ${appName}`;
-  document.getElementById("approve-desc").textContent =
-    `This will approve the pending ${env} deployment for ${appName} (run #${runId}).`;
+  currentApproveEnv   = env;
+  const envLabel = env === "prod" ? "Production" : "Dev";
+  document.getElementById("approve-title").textContent = `Approve ${envLabel} deploy — ${appName}`;
+  document.getElementById("approve-desc").innerHTML =
+    `Deploy <strong>${version}</strong> to <strong>${envLabel}</strong>?` +
+    `<br><a href="https://github.com/${REPO}/actions/runs/${runId}" target="_blank" style="font-size:0.8rem;color:#58a6ff">View run →</a>`;
   document.getElementById("approve-status").innerHTML = "";
   document.getElementById("approve-btn").disabled = false;
   document.getElementById("approve-btn").textContent = "Approve";
@@ -704,7 +725,7 @@ async function confirmApprove() {
   btn.disabled = true;
   btn.textContent = "Approving…";
   try {
-    await approvePendingDeployment(currentApproveRunId);
+    await approvePendingDeployment(currentApproveRunId, currentApproveEnv);
     statusEl.innerHTML = `<span class="ok">✓ Approved — deployment will start shortly</span>`;
     btn.textContent = "Done";
     setTimeout(() => { closeApproveModal(); load(); }, 2000);
