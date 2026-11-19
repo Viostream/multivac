@@ -67,6 +67,13 @@
     }
     .btn-promote:hover { background: #1f6feb; color: #fff; }
 
+    .btn-sprint {
+      background: #2a1a4a;
+      color: #bc8cff;
+      border-color: #8957e5;
+    }
+    .btn-sprint:hover { background: #8957e5; color: #fff; }
+
     .updated { font-size: 0.75rem; color: #484f58; margin-left: auto; }
 
     /* ── header ── */
@@ -286,6 +293,7 @@
   <select id="branch-select"><option>Loading branches…</option></select>
   <button class="btn btn-deploy" id="deploy-btn" onclick="openDeployModal()" disabled>🚀 Deploy branch to Dev</button>
   <button class="btn btn-promote" id="promote-btn" onclick="openPromoteModal()" style="display:none">⬆ Promote to Prod</button>
+  <button class="btn btn-sprint" onclick="openSprintModal()">🏁 Start Sprint</button>
   <button class="btn" onclick="load()">↻ Refresh</button>
   <button class="btn" onclick="resetToken()">🔑 Token</button>
   <span class="updated" id="last-updated">—</span>
@@ -320,6 +328,19 @@
     <button class="btn-confirm" onclick="saveToken()">Save</button>
   </div>
   <p class="token-note">Token is saved to localStorage in this browser only. To update it later, click the 🔑 Token button in the toolbar.</p>
+</div>
+
+<!-- sprint modal -->
+<div class="modal-backdrop" id="sprint-modal">
+  <div class="modal">
+    <h2 id="sprint-title">Start Sprint</h2>
+    <p id="sprint-desc">Calculating next sprint tag…</p>
+    <div class="dispatch-status" id="sprint-status"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeSprintModal()">Cancel</button>
+      <button class="btn-confirm" id="sprint-btn" onclick="confirmSprint()" disabled>Create Tag</button>
+    </div>
+  </div>
 </div>
 
 <!-- approve modal -->
@@ -693,6 +714,70 @@ async function load() {
   document.getElementById("last-updated").textContent =
     `Updated ${new Date().toLocaleTimeString()}`;
 }
+
+// ── sprint modal ──
+
+let nextSprintTag = null;
+let mainSha = null;
+
+async function openSprintModal() {
+  document.getElementById("sprint-desc").textContent = "Calculating next sprint tag…";
+  document.getElementById("sprint-status").innerHTML = "";
+  document.getElementById("sprint-btn").disabled = true;
+  document.getElementById("sprint-btn").textContent = "Create Tag";
+  document.getElementById("sprint-modal").classList.add("open");
+
+  try {
+    const [tagsResp, mainRef] = await Promise.all([
+      ghGet(`repos/${REPO}/tags?per_page=1`),
+      ghGet(`repos/${REPO}/git/ref/heads/main`),
+    ]);
+
+    mainSha = mainRef.object.sha;
+    const latest = tagsResp[0]?.name || "v2026.0.0";
+    const m = latest.match(/^v(\d+)\.(\d+)\.\d+$/);
+    if (!m) throw new Error(`Unexpected tag format: ${latest}`);
+
+    const year = m[1], sprint = parseInt(m[2]) + 1;
+    nextSprintTag = `v${year}.${sprint}.0`;
+
+    document.getElementById("sprint-desc").innerHTML =
+      `Create tag <strong>${nextSprintTag}</strong> on HEAD of main (<code>${mainSha.slice(0,7)}</code>)?
+       <br><span style="font-size:0.8rem;color:#8b949e">The next build after this will use sprint ${sprint}.</span>`;
+    document.getElementById("sprint-btn").disabled = false;
+  } catch(e) {
+    document.getElementById("sprint-desc").textContent = `Failed to calculate next tag: ${e.message}`;
+  }
+}
+
+function closeSprintModal() {
+  document.getElementById("sprint-modal").classList.remove("open");
+}
+
+async function confirmSprint() {
+  const btn = document.getElementById("sprint-btn");
+  const statusEl = document.getElementById("sprint-status");
+  btn.disabled = true;
+  btn.textContent = "Creating…";
+
+  try {
+    await ghPost(`repos/${REPO}/git/refs`, {
+      ref: `refs/tags/${nextSprintTag}`,
+      sha: mainSha,
+    });
+    statusEl.innerHTML = `<span class="ok">✓ Tag ${nextSprintTag} created</span>`;
+    btn.textContent = "Done";
+    setTimeout(() => closeSprintModal(), 2000);
+  } catch(e) {
+    statusEl.innerHTML = `<span class="err">✗ Failed: ${e.message}</span>`;
+    btn.disabled = false;
+    btn.textContent = "Create Tag";
+  }
+}
+
+document.getElementById("sprint-modal").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeSprintModal();
+});
 
 // ── approve modal ──
 
