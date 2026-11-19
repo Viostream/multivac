@@ -66,10 +66,10 @@
     .header {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 16px;
       margin-bottom: 20px;
     }
-    .header img { width: 32px; height: 32px; }
+    .header img { height: 28px; width: auto; }
     .header h1 { margin-bottom: 0; }
 
     /* ── table ── */
@@ -255,19 +255,21 @@ const REPO = "Viostream/viostream";
 const ENVS = ["dev1", "stag", "prod"];
 
 const APPS = [
-  { name: "Admin",      workflow: "admin.yml" },
-  { name: "API",        workflow: "api.yml" },
-  { name: "Caption",    workflow: "caption.yml" },
-  { name: "Console",    workflow: "console.yml" },
-  { name: "Content",    workflow: "content.yml" },
-  { name: "Database",   workflow: "database.yml" },
-  { name: "Director",   workflow: "director.yml" },
-  { name: "Ingest",     workflow: "ingest.yml" },
-  { name: "Player",     workflow: "player.yml" },
-  { name: "Storage",    workflow: "storage.yml" },
-  { name: "Transcoder", workflow: "transcoder.yml" },
-  { name: "Worker",     workflow: "worker.yml" },
+  { name: "Admin",      workflow: "admin.yml",      paths: ["src/Admin/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/Console/Viostream.Console.Messages/", ".github/workflows/admin.yml"] },
+  { name: "API",        workflow: "api.yml",         paths: ["src/Api/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", ".github/workflows/api.yml"] },
+  { name: "Caption",    workflow: "caption.yml",     paths: ["src/Services/Caption/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/caption.yml"] },
+  { name: "Console",    workflow: "console.yml",     paths: ["src/Console/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/App/Viostream.Publish.Messages/", "src/Services/Director/Viostream.IApi.Pipeline.Messages/", ".github/workflows/console.yml"] },
+  { name: "Content",    workflow: "content.yml",     paths: ["src/Content/", ".github/workflows/content.yml"] },
+  { name: "Database",   workflow: "database.yml",    paths: ["src/Common/Viostream.Core.Database/", ".github/workflows/database.yml"] },
+  { name: "Director",   workflow: "director.yml",    paths: ["src/Services/Director/", ".github/workflows/director.yml"] },
+  { name: "Ingest",     workflow: "ingest.yml",      paths: ["src/Services/Ingest/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Services/Director/Viostream.IApi.Pipelines.Messages/", ".github/workflows/ingest.yml"] },
+  { name: "Player",     workflow: "player.yml",      paths: ["src/Player/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Restrictions/", "src/Common/Viostream.Core.Restrictions.Tests/", ".github/workflows/player.yml"] },
+  { name: "Storage",    workflow: "storage.yml",     paths: ["src/Services/Storage/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/storage.yml"] },
+  { name: "Transcoder", workflow: "transcoder.yml",  paths: ["src/Services/Transcoder/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/transcoder.yml"] },
+  { name: "Worker",     workflow: "worker.yml",      paths: ["src/Services/Worker/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/worker.yml"] },
 ];
+
+let currentDeployApps = APPS;
 
 function getToken() { return localStorage.getItem("gh_token") || ""; }
 
@@ -337,9 +339,21 @@ async function fetchEnv(env) {
     when:    d.created_at,
     who:     d.creator?.login || "?",
     state:   s.state || "unknown",
-    version: s.description || "",
+    version: s.description?.trim() || null,
     log_url: s.log_url || "",
   };
+}
+
+// Returns the subset of APPS that have changed files on `branch` vs `main`
+async function appsChangedOnBranch(branch) {
+  if (branch === "main") return APPS; // main deploys everything
+  try {
+    const comparison = await ghGet(`repos/${REPO}/compare/main...${encodeURIComponent(branch)}`);
+    const changedFiles = (comparison.files || []).map(f => f.filename);
+    return APPS.filter(app =>
+      app.paths.some(p => changedFiles.some(f => f.startsWith(p)))
+    );
+  } catch { return APPS; } // fall back to all if compare fails
 }
 
 async function aheadBy(base, head) {
@@ -452,17 +466,30 @@ async function load() {
 
 // ── modal ──
 
-function openModal() {
+async function openModal() {
   const branch = document.getElementById("branch-select").value;
   document.getElementById("modal-title").textContent = `Deploy to Dev`;
-  document.getElementById("modal-desc").textContent =
-    `This will trigger workflow_dispatch on branch "${branch}" for all apps.`;
-  document.getElementById("modal-apps").innerHTML =
-    APPS.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  document.getElementById("modal-desc").textContent = "Checking which apps have changes…";
+  document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
-  document.getElementById("confirm-btn").disabled = false;
+  document.getElementById("confirm-btn").disabled = true;
   document.getElementById("confirm-btn").textContent = "Deploy";
   document.getElementById("modal").classList.add("open");
+
+  const affected = await appsChangedOnBranch(branch);
+  currentDeployApps = affected;
+
+  if (!affected.length) {
+    document.getElementById("modal-desc").textContent =
+      `No apps have changes on "${branch}" vs main.`;
+    return;
+  }
+
+  document.getElementById("modal-desc").textContent =
+    `Deploy branch "${branch}" to Dev? Only apps with changes on this branch will be triggered.`;
+  document.getElementById("modal-apps").innerHTML =
+    affected.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  document.getElementById("confirm-btn").disabled = false;
 }
 
 function closeModal() {
@@ -479,7 +506,7 @@ async function confirmDeploy() {
   statusEl.innerHTML = "";
 
   const results = await Promise.allSettled(
-    APPS.map(app =>
+    currentDeployApps.map(app =>
       ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: branch })
         .then(() => ({ app: app.name, ok: true }))
         .catch(e  => ({ app: app.name, ok: false, err: e.message }))
