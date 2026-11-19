@@ -877,9 +877,27 @@ async function openDeployModal() {
   document.getElementById("modal-desc").textContent = "Checking which apps have changes…";
   document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
-  document.getElementById("confirm-btn").disabled = true;
-  document.getElementById("confirm-btn").textContent = "Deploy";
+  document.getElementById("modal-title").textContent =
+    currentDeployBranch === "main" ? "Approve Dev Deployments" : "Deploy to Dev";
+  document.getElementById("confirm-btn").textContent =
+    currentDeployBranch === "main" ? "Approve" : "Deploy";
   document.getElementById("modal").classList.add("open");
+
+  if (currentDeployBranch === "main") {
+    // Show pending dev deployments
+    const pending = await fetchAllPendingApprovals("dev1");
+    const toApprove = APPS.filter(app => pending[app.workflow]);
+    currentDeployApps = toApprove;
+    if (!toApprove.length) {
+      document.getElementById("modal-desc").textContent = "No pending dev deployments waiting for approval.";
+      return;
+    }
+    document.getElementById("modal-desc").textContent = "Approve these pending dev deployments:";
+    document.getElementById("modal-apps").innerHTML =
+      toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
+    document.getElementById("confirm-btn").disabled = false;
+    return;
+  }
 
   const affected = await appsChangedOnBranch(currentDeployBranch);
   currentDeployApps = affected;
@@ -890,8 +908,11 @@ async function openDeployModal() {
     return;
   }
 
-  document.getElementById("modal-desc").textContent =
-    `Deploy branch "${currentDeployBranch}" to Dev? Only apps with changes on this branch will be triggered.`;
+  if (currentDeployBranch === "main") {
+    document.getElementById("modal-desc").textContent = "Checking for pending dev deployments to approve…";
+  } else {
+    document.getElementById("modal-desc").textContent = `Deploy branch "${currentDeployBranch}" to Dev? Only apps with changes on this branch will be triggered.`;
+  }
   document.getElementById("modal-apps").innerHTML =
     affected.map(a => `<div class="app-item">${a.name}</div>`).join("");
   document.getElementById("confirm-btn").disabled = false;
@@ -927,6 +948,36 @@ async function confirmDeploy() {
   confirmBtn.textContent = "Dispatching…";
   statusEl.innerHTML = "";
 
+  // For main: approve pending dev deployments rather than triggering new builds
+  if (currentDeployBranch === "main") {
+    const pending = await fetchAllPendingApprovals("dev1");
+    const toApprove = currentDeployApps.filter(app => pending[app.workflow]);
+    if (!toApprove.length) {
+      statusEl.innerHTML = `<span class="err">No pending dev deployments found to approve</span>`;
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Deploy";
+      return;
+    }
+    const results = await Promise.allSettled(
+      toApprove.map(app =>
+        approvePendingDeployment(pending[app.workflow].runId, "dev1")
+          .then(() => ({ app: app.name, ok: true }))
+          .catch(e  => ({ app: app.name, ok: false, err: e.message }))
+      )
+    );
+    const values  = results.map(r => r.value || r.reason);
+    const failed  = values.filter(v => !v.ok);
+    const succeeded = values.filter(v => v.ok);
+    let html = "";
+    if (succeeded.length) html += `<span class="ok">✓ Approved ${succeeded.length} deployment${succeeded.length > 1 ? "s" : ""}</span><br>`;
+    if (failed.length)    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
+    statusEl.innerHTML = html;
+    confirmBtn.textContent = "Done";
+    if (!failed.length) setTimeout(() => { closeModal(); load(); }, 2000);
+    return;
+  }
+
+  // For feature branches: workflow_dispatch to trigger a new build
   const results = await Promise.allSettled(
     currentDeployApps.map(app =>
       ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: currentDeployBranch })
