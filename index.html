@@ -352,30 +352,26 @@ function badgeClass(state) {
 // Returns a map of workflow filename -> run_id
 async function fetchAllPendingApprovals(env) {
   const map = {};
-  try {
-    const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
-    // Only check recent ones - parallel fetch statuses
-    const withStatuses = await Promise.all(
-      deployments.map(async d => {
-        const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
-        return { d, status: statuses[0] };
-      })
-    );
-    const waiting = withStatuses.filter(({ status }) => status?.state === "waiting");
-    // Fetch run info for each waiting deployment in parallel
-    await Promise.all(
-      waiting.map(async ({ status }) => {
-        const match = status.log_url?.match(/runs\/(\d+)/);
-        if (!match) return;
-        const runId = match[1];
-        try {
-          const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
-          const wf = run.path?.replace(".github/workflows/", "");
-          if (wf) map[wf] = runId;
-        } catch {}
-      })
-    );
-  } catch {}
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
+  const withStatuses = await Promise.allSettled(
+    deployments.map(async d => {
+      const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
+      return { d, status: statuses[0] };
+    })
+  );
+  const waiting = withStatuses
+    .filter(r => r.status === "fulfilled" && r.value.status?.state === "waiting")
+    .map(r => r.value);
+  await Promise.allSettled(
+    waiting.map(async ({ status }) => {
+      const match = status.log_url?.match(/runs\/(\d+)/);
+      if (!match) return;
+      const runId = match[1];
+      const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
+      const wf = run.path?.replace(".github/workflows/", "");
+      if (wf) map[wf] = runId;
+    })
+  );
   return map;
 }
 
@@ -522,10 +518,12 @@ async function load() {
   // Fetch pending approvals once per env, then per-app/env data in parallel
   let appData, pendingProdMap, pendingDevMap;
   try {
-    [pendingProdMap, pendingDevMap] = await Promise.all([
+    const [prodPending, devPending] = await Promise.allSettled([
       fetchAllPendingApprovals("prod"),
       fetchAllPendingApprovals("dev1"),
     ]);
+    pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
+    pendingDevMap  = devPending.status  === "fulfilled" ? devPending.value  : {};
     appData = await Promise.all(
       APPS.map(async app => ({
         app,
