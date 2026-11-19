@@ -646,7 +646,7 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 
   if (!d) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
 
-  const version  = d.version || d.sha7;
+  const version  = d.version || window._tagMap?.[d.sha7] || d.sha7;
   const bc       = badgeClass(d.state);
   const href     = d.log_url || `https://github.com/${REPO}/deployments/activity_log?environment=${env}`;
   const ahead    = aheadCount > 0 ? `<span class="ahead-badge">+${aheadCount} ahead</span>` : "";
