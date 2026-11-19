@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multivac</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #58a6ff;
+      margin-bottom: 16px;
+    }
+
+    /* ── toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    select {
+      padding: 5px 10px;
+      border-radius: 6px;
+      background: #161b22;
+      color: #e6edf3;
+      border: 1px solid #30363d;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .btn {
+      padding: 5px 12px;
+      border-radius: 6px;
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      cursor: pointer;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    .btn:hover { background: #30363d; color: #e6edf3; }
+
+    .btn-deploy {
+      background: #1a4a1a;
+      color: #3fb950;
+      border-color: #238636;
+    }
+    .btn-deploy:hover { background: #238636; color: #fff; }
+    .btn-deploy:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .updated { font-size: 0.75rem; color: #484f58; margin-left: auto; }
+
+    /* ── header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .header img { width: 32px; height: 32px; }
+    .header h1 { margin-bottom: 0; }
+
+    /* ── table ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+
+    thead th {
+      text-align: left;
+      padding: 8px 12px;
+      color: #8b949e;
+      font-weight: 500;
+      border-bottom: 1px solid #21262d;
+      white-space: nowrap;
+    }
+    thead th.env-header { text-align: center; min-width: 190px; }
+
+    tbody tr:hover { background: #161b22; }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #21262d;
+      vertical-align: middle;
+    }
+
+    .app-name { font-weight: 600; white-space: nowrap; }
+    .cell { text-align: center; }
+
+    .version-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .badge-success { background: #1a4a1a; color: #3fb950; border: 1px solid #238636; }
+    .badge-failure { background: #4a1a1a; color: #f85149; border: 1px solid #da3633; }
+    .badge-pending { background: #2a2a1a; color: #d29922; border: 1px solid #9e6a03; }
+    .badge-none    { background: #161b22; color: #484f58; border: 1px solid #30363d; }
+
+    .meta { display: block; font-size: 0.7rem; color: #8b949e; margin-top: 2px; }
+
+    .ahead-badge {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 5px;
+      border-radius: 10px;
+      font-size: 0.65rem;
+      background: #2a1f00;
+      color: #d29922;
+      border: 1px solid #9e6a03;
+      vertical-align: middle;
+    }
+
+    .diff-link {
+      font-size: 0.7rem;
+      color: #58a6ff;
+      text-decoration: none;
+      display: block;
+      margin-top: 3px;
+    }
+    .diff-link:hover { text-decoration: underline; }
+
+    .redeploy-btn {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      text-decoration: none;
+    }
+    .redeploy-btn:hover { background: #30363d; color: #e6edf3; }
+
+    .loading { color: #8b949e; font-size: 0.85rem; padding: 20px 0; }
+    .error   { color: #f85149; font-size: 0.85rem; padding: 20px 0; }
+
+    /* ── modal ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+
+    .modal {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 24px;
+      max-width: 480px;
+      width: 100%;
+    }
+
+    .modal h2 { font-size: 1rem; margin-bottom: 8px; }
+
+    .modal p { font-size: 0.85rem; color: #8b949e; margin-bottom: 16px; }
+
+    .modal .app-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
+    .modal .app-item {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+      background: #1a4a1a;
+      color: #3fb950;
+      border-radius: 4px;
+      border: 1px solid #238636;
+      text-align: center;
+    }
+
+    .modal .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .btn-confirm {
+      padding: 6px 16px;
+      border-radius: 6px;
+      background: #238636;
+      color: #fff;
+      border: 1px solid #2ea043;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .btn-confirm:hover { background: #2ea043; }
+    .btn-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .dispatch-status {
+      font-size: 0.8rem;
+      margin-bottom: 12px;
+      min-height: 1.2em;
+    }
+    .dispatch-status .ok  { color: #3fb950; }
+    .dispatch-status .err { color: #f85149; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <img src="viostream.png" alt="Viostream">
+  <h1>Multivac</h1>
+</div>
+
+<div class="toolbar">
+  <select id="branch-select"><option>Loading branches…</option></select>
+  <button class="btn btn-deploy" id="deploy-btn" onclick="openModal()" disabled>🚀 Deploy all to Dev</button>
+  <button class="btn" onclick="load()">↻ Refresh</button>
+  <button class="btn" onclick="resetToken()">🔑 Token</button>
+  <span class="updated" id="last-updated">—</span>
+</div>
+
+<div id="content"><p class="loading">Loading…</p></div>
+
+<!-- confirm modal -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h2 id="modal-title">Deploy to Dev</h2>
+    <p id="modal-desc"></p>
+    <div class="app-grid" id="modal-apps"></div>
+    <div class="dispatch-status" id="dispatch-status"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn-confirm" id="confirm-btn" onclick="confirmDeploy()">Deploy</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPO = "Viostream/viostream";
+const ENVS = ["dev1", "stag", "prod"];
+
+const APPS = [
+  { name: "Admin",      workflow: "admin.yml" },
+  { name: "API",        workflow: "api.yml" },
+  { name: "Caption",    workflow: "caption.yml" },
+  { name: "Console",    workflow: "console.yml" },
+  { name: "Content",    workflow: "content.yml" },
+  { name: "Database",   workflow: "database.yml" },
+  { name: "Director",   workflow: "director.yml" },
+  { name: "Ingest",     workflow: "ingest.yml" },
+  { name: "Player",     workflow: "player.yml" },
+  { name: "Storage",    workflow: "storage.yml" },
+  { name: "Transcoder", workflow: "transcoder.yml" },
+  { name: "Worker",     workflow: "worker.yml" },
+];
+
+function getToken() { return localStorage.getItem("gh_token") || ""; }
+
+function resetToken() {
+  const t = prompt("GitHub PAT (classic, repo scope):");
+  if (t) { localStorage.setItem("gh_token", t.trim()); load(); }
+}
+
+function ghGet(path) {
+  const token = getToken();
+  if (!token) return Promise.reject(new Error("no token"));
+  return fetch(`https://api.github.com/${path}`, {
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    }
+  }).then(r => {
+    if (!r.ok) throw new Error(`${r.status} ${r.url}`);
+    return r.json();
+  });
+}
+
+function ghPost(path, body) {
+  const token = getToken();
+  if (!token) return Promise.reject(new Error("no token"));
+  return fetch(`https://api.github.com/${path}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  }).then(r => {
+    if (!r.ok) throw new Error(`${r.status}`);
+    return r.status;
+  });
+}
+
+function relativeTime(iso) {
+  const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (diff < 60)    return `${diff}s ago`;
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function badgeClass(state) {
+  if (state === "success") return "badge-success";
+  if (state === "failure" || state === "error") return "badge-failure";
+  if (["in_progress","pending","waiting","queued"].includes(state)) return "badge-pending";
+  return "badge-none";
+}
+
+async function fetchEnv(env) {
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=1`);
+  if (!deployments.length) return null;
+  const d = deployments[0];
+  const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
+  const s = statuses[0] || {};
+  return {
+    sha:     d.sha,
+    sha7:    d.sha.slice(0, 7),
+    ref:     d.ref,
+    when:    d.created_at,
+    who:     d.creator?.login || "?",
+    state:   s.state || "unknown",
+    version: s.description || "",
+    log_url: s.log_url || "",
+  };
+}
+
+async function aheadBy(base, head) {
+  if (!base || !head || base === head) return 0;
+  try {
+    const r = await ghGet(`repos/${REPO}/compare/${base}...${head}`);
+    return r.ahead_by || 0;
+  } catch { return 0; }
+}
+
+async function loadBranches() {
+  try {
+    // Fetch all branches (paginate to 200)
+    const [p1, p2] = await Promise.all([
+      ghGet(`repos/${REPO}/branches?per_page=100&page=1`),
+      ghGet(`repos/${REPO}/branches?per_page=100&page=2`),
+    ]);
+    const branches = [...p1, ...p2].map(b => b.name);
+
+    // Sort: main first, then alphabetical
+    branches.sort((a, b) => {
+      if (a === "main") return -1;
+      if (b === "main") return 1;
+      return a.localeCompare(b);
+    });
+
+    const sel = document.getElementById("branch-select");
+    sel.innerHTML = branches.map(b =>
+      `<option value="${b}">${b}</option>`
+    ).join("");
+
+    document.getElementById("deploy-btn").disabled = false;
+  } catch (e) {
+    document.getElementById("branch-select").innerHTML = `<option>Failed to load branches</option>`;
+  }
+}
+
+function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl) {
+  if (!d) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
+
+  const version  = d.version || d.sha7;
+  const bc       = badgeClass(d.state);
+  const href     = d.log_url || `https://github.com/${REPO}/deployments/activity_log?environment=${env}`;
+  const ahead    = aheadCount > 0 ? `<span class="ahead-badge">+${aheadCount} ahead</span>` : "";
+  const diff     = diffUrl && aheadCount > 0
+    ? `<a class="diff-link" href="${diffUrl}" target="_blank">view diff →</a>` : "";
+
+  return `
+    <td class="cell">
+      <a class="version-badge ${bc}" href="${href}" target="_blank">${version}</a>${ahead}
+      <span class="meta">${d.who} · ${relativeTime(d.when)}</span>
+      ${diff}
+      <a class="redeploy-btn" href="${redeployUrl}" target="_blank">↺ redeploy</a>
+    </td>`;
+}
+
+async function load() {
+  if (!getToken()) { resetToken(); return; }
+
+  document.getElementById("last-updated").textContent = "Loading…";
+
+  let envData;
+  try {
+    envData = Object.fromEntries(
+      await Promise.all(ENVS.map(async e => [e, await fetchEnv(e)]))
+    );
+  } catch (err) {
+    document.getElementById("content").innerHTML =
+      `<p class="error">Failed to load: ${err.message}</p>`;
+    document.getElementById("last-updated").textContent = "Error";
+    return;
+  }
+
+  const [stagAhead, devAhead] = await Promise.all([
+    aheadBy(envData.prod?.sha, envData.stag?.sha),
+    aheadBy(envData.stag?.sha, envData.dev1?.sha),
+  ]);
+
+  const diffStagProd = envData.prod && envData.stag
+    ? `https://github.com/${REPO}/compare/${envData.prod.sha}...${envData.stag.sha}` : "";
+  const diffDevStag  = envData.stag && envData.dev1
+    ? `https://github.com/${REPO}/compare/${envData.stag.sha}...${envData.dev1.sha}` : "";
+
+  let rows = "";
+  for (const app of APPS) {
+    const redeploy = `https://github.com/${REPO}/actions/workflows/${app.workflow}`;
+    rows += `<tr><td class="app-name">${app.name}</td>`;
+    rows += renderEnvCell(envData.dev1, "dev1", devAhead,   diffDevStag,  redeploy);
+    rows += renderEnvCell(envData.stag, "stag", stagAhead,  diffStagProd, redeploy);
+    rows += renderEnvCell(envData.prod, "prod", 0,          "",           redeploy);
+    rows += `</tr>`;
+  }
+
+  document.getElementById("content").innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>App</th>
+          <th class="env-header">Dev</th>
+          <th class="env-header">Staging</th>
+          <th class="env-header">Production</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  document.getElementById("last-updated").textContent =
+    `Updated ${new Date().toLocaleTimeString()}`;
+}
+
+// ── modal ──
+
+function openModal() {
+  const branch = document.getElementById("branch-select").value;
+  document.getElementById("modal-title").textContent = `Deploy to Dev`;
+  document.getElementById("modal-desc").textContent =
+    `This will trigger workflow_dispatch on branch "${branch}" for all apps.`;
+  document.getElementById("modal-apps").innerHTML =
+    APPS.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  document.getElementById("dispatch-status").innerHTML = "";
+  document.getElementById("confirm-btn").disabled = false;
+  document.getElementById("confirm-btn").textContent = "Deploy";
+  document.getElementById("modal").classList.add("open");
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+}
+
+async function confirmDeploy() {
+  const branch = document.getElementById("branch-select").value;
+  const confirmBtn = document.getElementById("confirm-btn");
+  const statusEl  = document.getElementById("dispatch-status");
+
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = "Dispatching…";
+  statusEl.innerHTML = "";
+
+  const results = await Promise.allSettled(
+    APPS.map(app =>
+      ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: branch })
+        .then(() => ({ app: app.name, ok: true }))
+        .catch(e  => ({ app: app.name, ok: false, err: e.message }))
+    )
+  );
+
+  const values   = results.map(r => r.value || r.reason);
+  const failed   = values.filter(v => !v.ok);
+  const succeeded = values.filter(v => v.ok);
+
+  let html = "";
+  if (succeeded.length)
+    html += `<span class="ok">✓ Dispatched ${succeeded.length} workflow${succeeded.length > 1 ? "s" : ""}</span><br>`;
+  if (failed.length)
+    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
+
+  statusEl.innerHTML = html;
+  confirmBtn.textContent = "Done";
+
+  // Auto-close after 2s if all succeeded, then refresh
+  if (!failed.length) {
+    setTimeout(() => {
+      closeModal();
+      load();
+    }, 2000);
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById("modal").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+load();
+loadBranches();
+setInterval(load, 120_000);
+</script>
+</body>
+</html>
