@@ -60,6 +60,13 @@
     .btn-deploy:hover { background: #238636; color: #fff; }
     .btn-deploy:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    .btn-promote {
+      background: #1a2f4a;
+      color: #58a6ff;
+      border-color: #1f6feb;
+    }
+    .btn-promote:hover { background: #1f6feb; color: #fff; }
+
     .updated { font-size: 0.75rem; color: #484f58; margin-left: auto; }
 
     /* ── header ── */
@@ -228,7 +235,8 @@
 
 <div class="toolbar">
   <select id="branch-select"><option>Loading branches…</option></select>
-  <button class="btn btn-deploy" id="deploy-btn" onclick="openModal()" disabled>🚀 Deploy all to Dev</button>
+  <button class="btn btn-deploy" id="deploy-btn" onclick="openDeployModal()" disabled>🚀 Deploy branch to Dev</button>
+  <button class="btn btn-promote" id="promote-btn" onclick="openPromoteModal()" style="display:none">⬆ Promote to Prod</button>
   <button class="btn" onclick="load()">↻ Refresh</button>
   <button class="btn" onclick="resetToken()">🔑 Token</button>
   <span class="updated" id="last-updated">—</span>
@@ -252,7 +260,7 @@
 
 <script>
 const REPO = "Viostream/viostream";
-const ENVS = ["dev1", "stag", "prod"];
+const ENVS = ["dev1", "prod"];
 
 const APPS = [
   { name: "Admin",      workflow: "admin.yml",      paths: ["src/Admin/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/Console/Viostream.Console.Messages/", ".github/workflows/admin.yml"] },
@@ -270,6 +278,7 @@ const APPS = [
 ];
 
 let currentDeployApps = APPS;
+let currentDeployBranch = "main";
 
 function getToken() { return localStorage.getItem("gh_token") || ""; }
 
@@ -427,23 +436,20 @@ async function load() {
     return;
   }
 
-  const [stagAhead, devAhead] = await Promise.all([
-    aheadBy(envData.prod?.sha, envData.stag?.sha),
-    aheadBy(envData.stag?.sha, envData.dev1?.sha),
-  ]);
+  const devProdAhead = await aheadBy(envData.prod?.sha, envData.dev1?.sha);
+  const diffDevProd = envData.prod && envData.dev1
+    ? `https://github.com/${REPO}/compare/${envData.prod.sha}...${envData.dev1.sha}` : "";
 
-  const diffStagProd = envData.prod && envData.stag
-    ? `https://github.com/${REPO}/compare/${envData.prod.sha}...${envData.stag.sha}` : "";
-  const diffDevStag  = envData.stag && envData.dev1
-    ? `https://github.com/${REPO}/compare/${envData.stag.sha}...${envData.dev1.sha}` : "";
+  // show/hide promote button
+  document.getElementById("promote-btn").style.display =
+    devProdAhead > 0 ? "inline-block" : "none";
 
   let rows = "";
   for (const app of APPS) {
     const redeploy = `https://github.com/${REPO}/actions/workflows/${app.workflow}`;
     rows += `<tr><td class="app-name">${app.name}</td>`;
-    rows += renderEnvCell(envData.dev1, "dev1", devAhead,   diffDevStag,  redeploy);
-    rows += renderEnvCell(envData.stag, "stag", stagAhead,  diffStagProd, redeploy);
-    rows += renderEnvCell(envData.prod, "prod", 0,          "",           redeploy);
+    rows += renderEnvCell(envData.dev1, "dev1", devProdAhead, diffDevProd, redeploy);
+    rows += renderEnvCell(envData.prod, "prod", 0,            "",          redeploy);
     rows += `</tr>`;
   }
 
@@ -453,7 +459,6 @@ async function load() {
         <tr>
           <th>App</th>
           <th class="env-header">Dev</th>
-          <th class="env-header">Staging</th>
           <th class="env-header">Production</th>
         </tr>
       </thead>
@@ -466,8 +471,12 @@ async function load() {
 
 // ── modal ──
 
-async function openModal() {
-  const branch = document.getElementById("branch-select").value;
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+}
+
+async function openDeployModal() {
+  currentDeployBranch = document.getElementById("branch-select").value;
   document.getElementById("modal-title").textContent = `Deploy to Dev`;
   document.getElementById("modal-desc").textContent = "Checking which apps have changes…";
   document.getElementById("modal-apps").innerHTML = "";
@@ -476,28 +485,45 @@ async function openModal() {
   document.getElementById("confirm-btn").textContent = "Deploy";
   document.getElementById("modal").classList.add("open");
 
-  const affected = await appsChangedOnBranch(branch);
+  const affected = await appsChangedOnBranch(currentDeployBranch);
   currentDeployApps = affected;
 
   if (!affected.length) {
     document.getElementById("modal-desc").textContent =
-      `No apps have changes on "${branch}" vs main.`;
+      `No apps have changes on "${currentDeployBranch}" vs main.`;
     return;
   }
 
   document.getElementById("modal-desc").textContent =
-    `Deploy branch "${branch}" to Dev? Only apps with changes on this branch will be triggered.`;
+    `Deploy branch "${currentDeployBranch}" to Dev? Only apps with changes on this branch will be triggered.`;
   document.getElementById("modal-apps").innerHTML =
     affected.map(a => `<div class="app-item">${a.name}</div>`).join("");
   document.getElementById("confirm-btn").disabled = false;
 }
 
-function closeModal() {
-  document.getElementById("modal").classList.remove("open");
+async function openPromoteModal() {
+  document.getElementById("modal-title").textContent = "Promote to Production";
+  document.getElementById("modal-desc").textContent = "Checking which apps are ahead of prod…";
+  document.getElementById("modal-apps").innerHTML = "";
+  document.getElementById("dispatch-status").innerHTML = "";
+  document.getElementById("confirm-btn").disabled = true;
+  document.getElementById("confirm-btn").textContent = "Promote";
+  document.getElementById("modal").classList.add("open");
+
+  // Apps to promote = all apps (workflow_dispatch on main triggers full pipeline)
+  // The pipeline gates prod behind required_reviewers in GitHub — safe to trigger all
+  currentDeployApps = APPS;
+  currentDeployBranch = "main";
+
+  document.getElementById("modal-desc").innerHTML =
+    `Trigger <strong>workflow_dispatch on main</strong> for all apps.<br>
+     Dev → Staging → Prod will run automatically. <strong>Prod requires approval in GitHub Actions.</strong>`;
+  document.getElementById("modal-apps").innerHTML =
+    APPS.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  document.getElementById("confirm-btn").disabled = false;
 }
 
 async function confirmDeploy() {
-  const branch = document.getElementById("branch-select").value;
   const confirmBtn = document.getElementById("confirm-btn");
   const statusEl  = document.getElementById("dispatch-status");
 
@@ -507,7 +533,7 @@ async function confirmDeploy() {
 
   const results = await Promise.allSettled(
     currentDeployApps.map(app =>
-      ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: branch })
+      ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: currentDeployBranch })
         .then(() => ({ app: app.name, ok: true }))
         .catch(e  => ({ app: app.name, ok: false, err: e.message }))
     )
