@@ -299,18 +299,21 @@
   <p>To load deployment data you need a GitHub personal access token with access to the <strong>Viostream</strong> org. It's stored only in your browser's <code>localStorage</code> and never leaves your machine.</p>
 
   <ol>
-    <li>Go to <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=Multivac+deploy+dashboard" target="_blank">GitHub → Settings → Personal access tokens → Generate new token (classic)</a></li>
-    <li>Give it a name like <strong>Multivac</strong></li>
+    <li>Go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">GitHub → Settings → Personal access tokens → Fine-grained tokens → Generate new token</a></li>
+    <li>Set <strong>Resource owner</strong> to <strong>Viostream</strong> (not your personal account)</li>
     <li>Set an expiry (90 days is fine)</li>
-    <li>Tick these two scopes:</li>
+    <li>Under <strong>Repository access</strong>, select <strong>All repositories</strong> or just <code>viostream</code></li>
+    <li>Under <strong>Permissions → Repository permissions</strong>, set:</li>
   </ol>
 
   <div class="scopes">
-    <span class="scope-badge">repo</span>
-    <span class="scope-badge">workflow</span>
+    <span class="scope-badge">Actions: Read &amp; Write</span>
+    <span class="scope-badge">Contents: Read</span>
+    <span class="scope-badge">Deployments: Read &amp; Write</span>
+    <span class="scope-badge">Metadata: Read</span>
   </div>
 
-  <p>Click <strong>Generate token</strong>, copy it, and paste it below.</p>
+  <p>Click <strong>Generate token</strong>, copy it, and paste it below. You may need a Viostream org admin to approve it.</p>
 
   <div class="token-input-row">
     <input type="password" id="token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
