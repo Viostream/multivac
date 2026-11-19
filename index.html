@@ -256,6 +256,17 @@
       margin-bottom: 20px;
     }
 
+    .ref-option {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      background: #0d1117;
+      cursor: pointer;
+      margin-bottom: 6px;
+    }
+    .ref-option:hover { border-color: #58a6ff; background: #161b22; }
+    .ref-option.selected { border-color: #238636; background: #1a4a1a; }
+
     .modal .app-item {
       font-size: 0.8rem;
       padding: 4px 8px;
@@ -490,11 +501,11 @@ function badgeClass(state) {
   return "badge-none";
 }
 
-// Fetch all pending approvals for an env in one pass.
-// Returns a map of workflow filename -> run_id
+// Fetch all pending approvals for an env.
+// Returns a map of workflow filename -> {runId, sha, ref}
 async function fetchAllPendingApprovals(env) {
   const map = {};
-  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=20`);
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=50`);
   const withStatuses = await Promise.allSettled(
     deployments.map(async d => {
       const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
@@ -505,14 +516,13 @@ async function fetchAllPendingApprovals(env) {
     .filter(r => r.status === "fulfilled" && r.value.status?.state === "waiting")
     .map(r => r.value);
   await Promise.allSettled(
-    waiting.map(async ({ status }) => {
+    waiting.map(async ({ d, status }) => {
       const match = status.log_url?.match(/runs\/(\d+)/);
       if (!match) return;
       const runId = match[1];
       const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
       const wf = run.path?.replace(".github/workflows/", "");
-      // store {runId, sha} so we can show the version in the approve modal
-      if (wf) map[wf] = { runId, sha: d.sha.slice(0, 7) };
+      if (wf) map[wf] = { runId, sha: d.sha.slice(0, 7), ref: d.ref };
     })
   );
   return map;
@@ -870,69 +880,96 @@ function closeModal() {
   document.getElementById("modal").classList.remove("open");
 }
 
+let currentDeployEnv  = "dev1";
+let currentDeployRef  = null;
+
 async function openDeployModal() {
-  currentDeployBranch = document.getElementById("branch-select")?.value || "dev1";
+  currentDeployEnv = "dev1";
   document.getElementById("modal-title").textContent = "Approve Dev Deployments";
-  document.getElementById("modal-desc").textContent = "Checking for pending dev deployments…";
+  document.getElementById("modal-desc").textContent = "Checking pending deployments…";
   document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
   document.getElementById("confirm-btn").disabled = true;
   document.getElementById("confirm-btn").textContent = "Approve";
   document.getElementById("modal").classList.add("open");
-
-  const pending = await fetchAllPendingApprovals("dev1");
-  const toApprove = APPS.filter(app => pending[app.workflow]);
-  currentDeployApps = toApprove;
-
-  if (!toApprove.length) {
-    document.getElementById("modal-desc").textContent = "No pending dev deployments waiting for approval.";
-    return;
-  }
-
-  document.getElementById("modal-desc").textContent = "Approve these pending dev deployments:";
-  document.getElementById("modal-apps").innerHTML =
-    toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
-  document.getElementById("confirm-btn").disabled = false;
+  await populateApproveModal("dev1");
 }
 
 async function openPromoteModal() {
+  currentDeployEnv = "prod";
   document.getElementById("modal-title").textContent = "Approve Prod Deployments";
-  document.getElementById("modal-desc").textContent = "Checking for pending prod deployments…";
+  document.getElementById("modal-desc").textContent = "Checking pending deployments…";
   document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
   document.getElementById("confirm-btn").disabled = true;
   document.getElementById("confirm-btn").textContent = "Approve";
   document.getElementById("modal").classList.add("open");
+  await populateApproveModal("prod");
+}
 
-  const pending = await fetchAllPendingApprovals("prod");
-  const toApprove = APPS.filter(app => pending[app.workflow]);
-  currentDeployApps = toApprove;
-  currentDeployBranch = "prod";
+async function populateApproveModal(env) {
+  const pending = await fetchAllPendingApprovals(env);
+  window._lastPending = window._lastPending || {};
+  window._lastPending[env] = pending;
 
-  if (!toApprove.length) {
-    document.getElementById("modal-desc").textContent = "No pending prod deployments waiting for approval.";
+  if (!Object.keys(pending).length) {
+    document.getElementById("modal-desc").textContent = "No pending deployments waiting for approval.";
     return;
   }
 
-  document.getElementById("modal-desc").textContent = "Approve these pending prod deployments:";
-  document.getElementById("modal-apps").innerHTML =
-    toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  // Group by ref
+  const byRef = {};
+  for (const [wf, info] of Object.entries(pending)) {
+    if (!byRef[info.ref]) byRef[info.ref] = { ref: info.ref, sha: info.sha, apps: [] };
+    const app = APPS.find(a => a.workflow === wf);
+    if (app) byRef[info.ref].apps.push(app);
+  }
+  const refs = Object.values(byRef);
+
+  if (refs.length === 1) {
+    currentDeployRef  = refs[0].ref;
+    currentDeployApps = refs[0].apps;
+    document.getElementById("modal-desc").textContent =
+      `Approve ${env === "prod" ? "prod" : "dev"} deployments for ${refs[0].ref}:`;
+    document.getElementById("modal-apps").innerHTML =
+      refs[0].apps.map(a => `<div class="app-item">${a.name}</div>`).join("");
+    document.getElementById("confirm-btn").disabled = false;
+    return;
+  }
+
+  // Multiple refs — show picker
+  currentDeployRef = null;
+  document.getElementById("modal-desc").textContent = "Multiple builds pending — select one to approve:";
+  document.getElementById("modal-apps").innerHTML = refs.map(r => `
+    <div class="ref-option" onclick="selectRef('${r.ref}')" id="refopt-${r.ref.replace(/[^a-z0-9]/gi,'_')}">
+      <strong>${r.ref}</strong>
+      <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${r.sha} · ${r.apps.length} app${r.apps.length > 1 ? "s" : ""}</span>
+    </div>`).join("");
+}
+
+function selectRef(ref) {
+  currentDeployRef  = ref;
+  currentDeployApps = APPS.filter(a => window._lastPending?.[currentDeployEnv]?.[a.workflow]?.ref === ref);
+  document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
+  document.getElementById(`refopt-${ref.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
   document.getElementById("confirm-btn").disabled = false;
 }
 
 async function confirmDeploy() {
   const confirmBtn = document.getElementById("confirm-btn");
-  const statusEl  = document.getElementById("dispatch-status");
+  const statusEl   = document.getElementById("dispatch-status");
   confirmBtn.disabled = true;
   confirmBtn.textContent = "Approving…";
   statusEl.innerHTML = "";
 
-  const env = currentDeployBranch === "prod" ? "prod" : "dev1";
-  const pending = await fetchAllPendingApprovals(env);
+  const pending = await fetchAllPendingApprovals(currentDeployEnv);
+  const toApprove = currentDeployApps.filter(app =>
+    pending[app.workflow]?.ref === currentDeployRef
+  );
 
   const results = await Promise.allSettled(
-    currentDeployApps.map(app =>
-      approvePendingDeployment(pending[app.workflow].runId, env)
+    toApprove.map(app =>
+      approvePendingDeployment(pending[app.workflow].runId, currentDeployEnv)
         .then(() => ({ app: app.name, ok: true }))
         .catch(e  => ({ app: app.name, ok: false, err: e.message }))
     )
