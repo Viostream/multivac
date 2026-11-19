@@ -336,8 +336,28 @@ function badgeClass(state) {
 }
 
 async function fetchEnv(env) {
-  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=1`);
+  // Walk deployments until we find one with a success status — skips pending/waiting approvals
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=10`);
   if (!deployments.length) return null;
+
+  for (const d of deployments) {
+    const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=10`);
+    const success = statuses.find(s => s.state === "success");
+    if (success) {
+      return {
+        sha:     d.sha,
+        sha7:    d.sha.slice(0, 7),
+        ref:     d.ref,
+        when:    d.created_at,
+        who:     d.creator?.login || "?",
+        state:   "success",
+        version: success.description?.trim() || null,
+        log_url: success.log_url || "",
+      };
+    }
+  }
+
+  // Nothing succeeded yet — return latest with its real state
   const d = deployments[0];
   const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
   const s = statuses[0] || {};
