@@ -158,7 +158,54 @@
     .loading { color: #8b949e; font-size: 0.85rem; padding: 20px 0; }
     .error   { color: #f85149; font-size: 0.85rem; padding: 20px 0; }
 
-    /* ── modal ── */
+    /* ── token setup screen ── */
+    .token-screen {
+      display: none;
+      max-width: 520px;
+      margin: 60px auto;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 32px;
+    }
+    .token-screen.visible { display: block; }
+    .token-screen h2 { font-size: 1.1rem; margin-bottom: 8px; color: #e6edf3; }
+    .token-screen p  { font-size: 0.85rem; color: #8b949e; margin-bottom: 16px; line-height: 1.5; }
+    .token-screen ol { font-size: 0.85rem; color: #8b949e; margin: 0 0 20px 20px; line-height: 2; }
+    .token-screen ol a, .token-screen p a { color: #58a6ff; text-decoration: none; }
+    .token-screen ol a:hover, .token-screen p a:hover { text-decoration: underline; }
+    .token-screen .scopes {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .token-screen .scope-badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: #1a4a1a;
+      color: #3fb950;
+      border: 1px solid #238636;
+    }
+    .token-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .token-input-row input {
+      flex: 1;
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      font-size: 0.85rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+    .token-input-row input:focus { outline: none; border-color: #58a6ff; }
+    .token-note { font-size: 0.75rem; color: #484f58; }
     .modal-backdrop {
       display: none;
       position: fixed;
@@ -246,6 +293,32 @@
 
 <div id="content"><p class="loading">Loading…</p></div>
 
+<!-- token setup screen -->
+<div class="token-screen" id="token-screen">
+  <h2>👋 Welcome to Multivac</h2>
+  <p>To load deployment data you need a GitHub personal access token with access to the <strong>Viostream</strong> org. It's stored only in your browser's <code>localStorage</code> and never leaves your machine.</p>
+
+  <ol>
+    <li>Go to <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=Multivac+deploy+dashboard" target="_blank">GitHub → Settings → Personal access tokens → Generate new token (classic)</a></li>
+    <li>Give it a name like <strong>Multivac</strong></li>
+    <li>Set an expiry (90 days is fine)</li>
+    <li>Tick these two scopes:</li>
+  </ol>
+
+  <div class="scopes">
+    <span class="scope-badge">repo</span>
+    <span class="scope-badge">workflow</span>
+  </div>
+
+  <p>Click <strong>Generate token</strong>, copy it, and paste it below.</p>
+
+  <div class="token-input-row">
+    <input type="password" id="token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
+    <button class="btn-confirm" onclick="saveToken()">Save</button>
+  </div>
+  <p class="token-note">Token is saved to localStorage in this browser only. To update it later, click the 🔑 Token button in the toolbar.</p>
+</div>
+
 <!-- approve modal -->
 <div class="modal-backdrop" id="approve-modal">
   <div class="modal">
@@ -295,14 +368,35 @@ let currentDeployBranch = "main";
 
 function getToken() { return localStorage.getItem("gh_token") || ""; }
 
-function resetToken() {
-  const t = prompt(
-      "GitHub PAT (classic) with scopes: repo, workflow\n\n" +
-      "Create one at: https://github.com/settings/tokens/new?scopes=repo,workflow\n\n" +
-      "If you already have a token, edit it at https://github.com/settings/tokens and tick 'workflow'."
-    );
-  if (t) { localStorage.setItem("gh_token", t.trim()); load(); }
+function showTokenScreen() {
+  document.getElementById("token-screen").classList.add("visible");
+  document.getElementById("content").style.display = "none";
+  document.querySelector(".toolbar").style.display = "none";
 }
+
+function hideTokenScreen() {
+  document.getElementById("token-screen").classList.remove("visible");
+  document.getElementById("content").style.display = "";
+  document.querySelector(".toolbar").style.display = "";
+}
+
+function saveToken() {
+  const t = document.getElementById("token-input").value.trim();
+  if (!t) return;
+  localStorage.setItem("gh_token", t);
+  hideTokenScreen();
+  load();
+}
+
+function resetToken() {
+  document.getElementById("token-input").value = "";
+  showTokenScreen();
+}
+
+// Allow Enter key in token input
+document.getElementById("token-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") saveToken();
+});
 
 function ghGet(path) {
   const token = getToken();
@@ -515,7 +609,7 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 }
 
 async function load() {
-  if (!getToken()) { resetToken(); return; }
+  if (!getToken()) { showTokenScreen(); return; }
 
   document.getElementById("last-updated").textContent = "Loading…";
 
