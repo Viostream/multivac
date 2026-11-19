@@ -302,9 +302,8 @@
 </div>
 
 <div class="toolbar">
-  <select id="branch-select"><option>Loading branches…</option></select>
-  <button class="btn btn-deploy" id="deploy-btn" onclick="openDeployModal()" disabled>🚀 Deploy branch to Dev</button>
-  <button class="btn btn-promote" id="promote-btn" onclick="openPromoteModal()" style="display:none">⬆ Promote to Prod</button>
+  <button class="btn btn-deploy" id="deploy-btn" onclick="openDeployModal()">✅ Approve Dev</button>
+  <button class="btn btn-promote" id="promote-btn" onclick="openPromoteModal()" style="display:none">✅ Approve Prod</button>
   <button class="btn btn-sprint" onclick="openSprintModal()">🏁 Start Sprint</button>
   <button class="btn" onclick="load()">↻ Refresh</button>
   <button class="btn" onclick="resetToken()">🔑 Token</button>
@@ -872,140 +871,84 @@ function closeModal() {
 }
 
 async function openDeployModal() {
-  currentDeployBranch = document.getElementById("branch-select").value;
-  document.getElementById("modal-title").textContent = `Deploy to Dev`;
-  document.getElementById("modal-desc").textContent = "Checking which apps have changes…";
+  currentDeployBranch = document.getElementById("branch-select")?.value || "dev1";
+  document.getElementById("modal-title").textContent = "Approve Dev Deployments";
+  document.getElementById("modal-desc").textContent = "Checking for pending dev deployments…";
   document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
-  document.getElementById("modal-title").textContent =
-    currentDeployBranch === "main" ? "Approve Dev Deployments" : "Deploy to Dev";
-  document.getElementById("confirm-btn").textContent =
-    currentDeployBranch === "main" ? "Approve" : "Deploy";
+  document.getElementById("confirm-btn").disabled = true;
+  document.getElementById("confirm-btn").textContent = "Approve";
   document.getElementById("modal").classList.add("open");
 
-  if (currentDeployBranch === "main") {
-    // Show pending dev deployments
-    const pending = await fetchAllPendingApprovals("dev1");
-    const toApprove = APPS.filter(app => pending[app.workflow]);
-    currentDeployApps = toApprove;
-    if (!toApprove.length) {
-      document.getElementById("modal-desc").textContent = "No pending dev deployments waiting for approval.";
-      return;
-    }
-    document.getElementById("modal-desc").textContent = "Approve these pending dev deployments:";
-    document.getElementById("modal-apps").innerHTML =
-      toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
-    document.getElementById("confirm-btn").disabled = false;
+  const pending = await fetchAllPendingApprovals("dev1");
+  const toApprove = APPS.filter(app => pending[app.workflow]);
+  currentDeployApps = toApprove;
+
+  if (!toApprove.length) {
+    document.getElementById("modal-desc").textContent = "No pending dev deployments waiting for approval.";
     return;
   }
 
-  const affected = await appsChangedOnBranch(currentDeployBranch);
-  currentDeployApps = affected;
-
-  if (!affected.length) {
-    document.getElementById("modal-desc").textContent =
-      `No apps have changes on "${currentDeployBranch}" vs main.`;
-    return;
-  }
-
-  if (currentDeployBranch === "main") {
-    document.getElementById("modal-desc").textContent = "Checking for pending dev deployments to approve…";
-  } else {
-    document.getElementById("modal-desc").textContent = `Deploy branch "${currentDeployBranch}" to Dev? Only apps with changes on this branch will be triggered.`;
-  }
+  document.getElementById("modal-desc").textContent = "Approve these pending dev deployments:";
   document.getElementById("modal-apps").innerHTML =
-    affected.map(a => `<div class="app-item">${a.name}</div>`).join("");
+    toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
   document.getElementById("confirm-btn").disabled = false;
 }
 
 async function openPromoteModal() {
-  document.getElementById("modal-title").textContent = "Promote to Production";
-  document.getElementById("modal-desc").textContent = "Checking which apps are ahead of prod…";
+  document.getElementById("modal-title").textContent = "Approve Prod Deployments";
+  document.getElementById("modal-desc").textContent = "Checking for pending prod deployments…";
   document.getElementById("modal-apps").innerHTML = "";
   document.getElementById("dispatch-status").innerHTML = "";
   document.getElementById("confirm-btn").disabled = true;
-  document.getElementById("confirm-btn").textContent = "Promote";
+  document.getElementById("confirm-btn").textContent = "Approve";
   document.getElementById("modal").classList.add("open");
 
-  // Apps to promote = all apps (workflow_dispatch on main triggers full pipeline)
-  // The pipeline gates prod behind required_reviewers in GitHub — safe to trigger all
-  currentDeployApps = APPS;
-  currentDeployBranch = "main";
+  const pending = await fetchAllPendingApprovals("prod");
+  const toApprove = APPS.filter(app => pending[app.workflow]);
+  currentDeployApps = toApprove;
+  currentDeployBranch = "prod";
 
-  document.getElementById("modal-desc").innerHTML =
-    `Trigger <strong>workflow_dispatch on main</strong> for all apps.<br>
-     Dev → Staging → Prod will run automatically. <strong>Prod requires approval in GitHub Actions.</strong>`;
+  if (!toApprove.length) {
+    document.getElementById("modal-desc").textContent = "No pending prod deployments waiting for approval.";
+    return;
+  }
+
+  document.getElementById("modal-desc").textContent = "Approve these pending prod deployments:";
   document.getElementById("modal-apps").innerHTML =
-    APPS.map(a => `<div class="app-item">${a.name}</div>`).join("");
+    toApprove.map(a => `<div class="app-item">${a.name}</div>`).join("");
   document.getElementById("confirm-btn").disabled = false;
 }
 
 async function confirmDeploy() {
   const confirmBtn = document.getElementById("confirm-btn");
   const statusEl  = document.getElementById("dispatch-status");
-
   confirmBtn.disabled = true;
-  confirmBtn.textContent = "Dispatching…";
+  confirmBtn.textContent = "Approving…";
   statusEl.innerHTML = "";
 
-  // For main: approve pending dev deployments rather than triggering new builds
-  if (currentDeployBranch === "main") {
-    const pending = await fetchAllPendingApprovals("dev1");
-    const toApprove = currentDeployApps.filter(app => pending[app.workflow]);
-    if (!toApprove.length) {
-      statusEl.innerHTML = `<span class="err">No pending dev deployments found to approve</span>`;
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Deploy";
-      return;
-    }
-    const results = await Promise.allSettled(
-      toApprove.map(app =>
-        approvePendingDeployment(pending[app.workflow].runId, "dev1")
-          .then(() => ({ app: app.name, ok: true }))
-          .catch(e  => ({ app: app.name, ok: false, err: e.message }))
-      )
-    );
-    const values  = results.map(r => r.value || r.reason);
-    const failed  = values.filter(v => !v.ok);
-    const succeeded = values.filter(v => v.ok);
-    let html = "";
-    if (succeeded.length) html += `<span class="ok">✓ Approved ${succeeded.length} deployment${succeeded.length > 1 ? "s" : ""}</span><br>`;
-    if (failed.length)    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
-    statusEl.innerHTML = html;
-    confirmBtn.textContent = "Done";
-    if (!failed.length) setTimeout(() => { closeModal(); load(); }, 2000);
-    return;
-  }
+  const env = currentDeployBranch === "prod" ? "prod" : "dev1";
+  const pending = await fetchAllPendingApprovals(env);
 
-  // For feature branches: workflow_dispatch to trigger a new build
   const results = await Promise.allSettled(
     currentDeployApps.map(app =>
-      ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: currentDeployBranch })
+      approvePendingDeployment(pending[app.workflow].runId, env)
         .then(() => ({ app: app.name, ok: true }))
         .catch(e  => ({ app: app.name, ok: false, err: e.message }))
     )
   );
 
-  const values   = results.map(r => r.value || r.reason);
-  const failed   = values.filter(v => !v.ok);
+  const values    = results.map(r => r.value || r.reason);
+  const failed    = values.filter(v => !v.ok);
   const succeeded = values.filter(v => v.ok);
 
   let html = "";
-  if (succeeded.length)
-    html += `<span class="ok">✓ Dispatched ${succeeded.length} workflow${succeeded.length > 1 ? "s" : ""}</span><br>`;
-  if (failed.length)
-    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
+  if (succeeded.length) html += `<span class="ok">✓ Approved ${succeeded.length} deployment${succeeded.length > 1 ? "s" : ""}</span><br>`;
+  if (failed.length)    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
 
   statusEl.innerHTML = html;
   confirmBtn.textContent = "Done";
-
-  // Auto-close after 2s if all succeeded, then refresh
-  if (!failed.length) {
-    setTimeout(() => {
-      closeModal();
-      load();
-    }, 2000);
-  }
+  if (!failed.length) setTimeout(() => { closeModal(); load(); }, 2000);
 }
 
 // Close modal on backdrop click
@@ -1014,7 +957,7 @@ document.getElementById("modal").addEventListener("click", e => {
 });
 
 load();
-loadBranches();
+// removed: loadBranches() — branch dispatch no longer used
 setInterval(load, 120_000);
 </script>
 </body>
