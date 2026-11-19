@@ -126,6 +126,18 @@
     .badge-waiting:hover { background: #bb8009; color: #fff; }
     .badge-none    { background: #161b22; color: #484f58; border: 1px solid #30363d; }
 
+    .octopus-link {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      background: #161b22;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      text-decoration: none;
+    }
+    .octopus-link:hover { background: #30363d; color: #e6edf3; }
+
     .meta { display: block; font-size: 0.7rem; color: #8b949e; margin-top: 2px; }
 
     .ahead-badge {
@@ -374,18 +386,26 @@ const ENVS = ["dev1", "prod"];
 const ENV_IDS = { dev1: 4183922127, prod: 4183923335 };
 
 const APPS = [
-  { name: "Admin",      app: "viostream-admin-web",         workflow: "admin.yml",      paths: ["src/Admin/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/Console/Viostream.Console.Messages/", ".github/workflows/admin.yml"] },
-  { name: "API",        app: "viostream-api-web",           workflow: "api.yml",         paths: ["src/Api/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", ".github/workflows/api.yml"] },
-  { name: "Caption",    app: "viostream-caption-service",   workflow: "caption.yml",     paths: ["src/Services/Caption/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/caption.yml"] },
-  { name: "Console",    app: "viostream-console-web",       workflow: "console.yml",     paths: ["src/Console/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/App/Viostream.Publish.Messages/", "src/Services/Director/Viostream.IApi.Pipeline.Messages/", ".github/workflows/console.yml"] },
-  { name: "Content",    app: "viostream-content-web",       workflow: "content.yml",     paths: ["src/Content/", ".github/workflows/content.yml"] },
-  { name: "Database",   app: "viostream-core-database",     workflow: "database.yml",    paths: ["src/Common/Viostream.Core.Database/", ".github/workflows/database.yml"] },
-  { name: "Director",   app: "viostream-director-service",  workflow: "director.yml",    paths: ["src/Services/Director/", ".github/workflows/director.yml"] },
-  { name: "Ingest",     app: "viostream-ingest-service",    workflow: "ingest.yml",      paths: ["src/Services/Ingest/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Services/Director/Viostream.IApi.Pipelines.Messages/", ".github/workflows/ingest.yml"] },
-  { name: "Player",     app: "viostream-player-web",        workflow: "player.yml",      paths: ["src/Player/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Restrictions/", "src/Common/Viostream.Core.Restrictions.Tests/", ".github/workflows/player.yml"] },
-  { name: "Storage",    app: "viostream-storage-service",   workflow: "storage.yml",     paths: ["src/Services/Storage/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/storage.yml"] },
-  { name: "Transcoder", app: "viostream-transcoder-service",workflow: "transcoder.yml",  paths: ["src/Services/Transcoder/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/transcoder.yml"] },
-  { name: "Worker",     app: "viostream-worker-service",    workflow: "worker.yml",      paths: ["src/Services/Worker/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/worker.yml"] },
+  { name: "Admin",          app: "viostream-admin-web",                 workflow: "admin.yml",                      paths: ["src/Admin/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/Console/Viostream.Console.Messages/", ".github/workflows/admin.yml"] },
+  { name: "API",            app: "viostream-api-web",                   workflow: "api.yml",                        paths: ["src/Api/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", ".github/workflows/api.yml"] },
+  { name: "Caption",        app: "viostream-caption-service",           workflow: "caption.yml",                    paths: ["src/Services/Caption/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/caption.yml"] },
+  { name: "Console",        app: "viostream-console-web",               workflow: "console.yml",                    paths: ["src/Console/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Data/", "src/Common/Viostream.Core.Mapping/", "src/App/Viostream.Publish.Messages/", "src/Services/Director/Viostream.IApi.Pipeline.Messages/", ".github/workflows/console.yml"] },
+  { name: "Content",        app: "viostream-content-web",               workflow: "content.yml",                    paths: ["src/Content/", ".github/workflows/content.yml"] },
+  { name: "Director",       app: "viostream-director-service",          workflow: "director.yml",                   paths: ["src/Services/Director/", ".github/workflows/director.yml"] },
+  { name: "Ingest",         app: "viostream-ingest-service",            workflow: "ingest.yml",                     paths: ["src/Services/Ingest/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Services/Director/Viostream.IApi.Pipelines.Messages/", ".github/workflows/ingest.yml"] },
+  { name: "Media Schedule", app: "media-schedule-check-lambda",         workflow: "media-schedule-check.yml",       paths: ["src/Services/MediaScheduleCheck/", ".github/workflows/media-schedule-check.yml"] },
+  { name: "Player",         app: "viostream-player-web",                workflow: "player.yml",                     paths: ["src/Player/", "src/Common/Viostream.Core/", "src/Common/Viostream.Core.Restrictions/", "src/Common/Viostream.Core.Restrictions.Tests/", ".github/workflows/player.yml"] },
+  { name: "Remote Ingest",  app: "remote-ingest-poll-message-lambda",   workflow: "remote-ingest-poll-message.yml", paths: ["src/Services/RemoteIngestPollMessage/", ".github/workflows/remote-ingest-poll-message.yml"] },
+  { name: "Storage",        app: "viostream-storage-service",           workflow: "storage.yml",                    paths: ["src/Services/Storage/", "src/Services/Director/Viostream.Pipelines.Messages/", ".github/workflows/storage.yml"] },
+  { name: "Transcoder",     app: "viostream-transcoder-service",        workflow: "transcoder.yml",                 paths: ["src/Services/Transcoder/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/transcoder.yml"] },
+  { name: "Worker",         app: "viostream-worker-service",            workflow: "worker.yml",                     paths: ["src/Services/Worker/", "src/Services/Director/Viostream.Pipelines.Messages/", "src/Common/Viostream.Core/", ".github/workflows/worker.yml"] },
+];
+
+// Apps managed via Octopus Deploy — shown as links only, no deployment data
+const OCTOPUS_APPS = [
+  { name: "Database",            url: "https://viostream.octopus.app/app#/Spaces-1/projects/viostream-core-database" },
+  { name: "Database Transcoder", url: "https://viostream.octopus.app/app#/Spaces-1/projects/viostream-transcoder-database" },
+  { name: "Legacy Apps",         url: "https://viostream.octopus.app/app#/Spaces-1/projects/viostream-legacy-apps" },
 ];
 
 let currentDeployApps = APPS;
@@ -697,6 +717,16 @@ async function load() {
     rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, pendingDev,  app.name);
     rows += renderEnvCell(prod, "prod", 0,        "",      redeploy, pendingProd, app.name);
     rows += `</tr>`;
+  }
+
+  // Octopus-managed apps — link rows only
+  for (const oa of OCTOPUS_APPS) {
+    rows += `<tr>
+      <td class="app-name">${oa.name}</td>
+      <td class="cell" colspan="2">
+        <a class="octopus-link" href="${oa.url}" target="_blank">🐙 Manage in Octopus Deploy →</a>
+      </td>
+    </tr>`;
   }
 
   document.getElementById("content").innerHTML = `
