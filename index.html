@@ -780,9 +780,7 @@ async function confirmSprint() {
     btn.textContent = "Done";
     setTimeout(() => closeSprintModal(), 2000);
   } catch(e) {
-    statusEl.innerHTML = `<span class="err">✗ Failed: ${e.message}</span>`;
-    btn.disabled = false;
-    btn.textContent = "Create Tag";
+    statusEl.innerHTML = `<span class="err">✗ ${e.message === "422" ? `Tag ${nextSprintTag} already exists` : `Failed: ${e.message}`}</span>`;
   }
 }
 
