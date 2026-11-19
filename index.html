@@ -509,21 +509,11 @@ async function fetchEnv(env, app) {
     // inactive = GitHub auto-marked previous deployment superseded — skip it, look for success
     const success = statuses.find(s => s.state === "success");
     if (success) {
-      // Get triggering actor from the run (deployment creator is always github-actions[bot])
-      let who = d.creator?.login || "?";
-      const runMatch = success.log_url?.match(/runs\/(\d+)/);
-      if (runMatch) {
-        try {
-          const run = await ghGet(`repos/${REPO}/actions/runs/${runMatch[1]}`);
-          who = run.triggering_actor?.login || run.actor?.login || who;
-        } catch {}
-      }
       return {
         sha:     d.sha,
         sha7:    d.sha.slice(0, 7),
         ref:     d.ref,
         when:    d.created_at,
-        who,
         state:   "success",
         version: success.description?.trim() || null,
         log_url: success.log_url || "",
@@ -540,7 +530,6 @@ async function fetchEnv(env, app) {
     sha7:    d.sha.slice(0, 7),
     ref:     d.ref,
     when:    d.created_at,
-    who:     d.creator?.login || "?",
     state:   s.state || "unknown",
     version: s.description?.trim() || null,
     log_url: s.log_url || "",
@@ -626,7 +615,7 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
   return `
     <td class="cell">
       <a class="version-badge ${bc}" href="${href}" target="_blank">${version}</a>${ahead}
-      <span class="meta">${d.who} · ${relativeTime(d.when)}</span>
+      <span class="meta">${relativeTime(d.when)}</span>
       ${diff}
       <a class="redeploy-btn" href="${redeployUrl}" target="_blank">↺ redeploy</a>
     </td>`;
