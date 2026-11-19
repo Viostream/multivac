@@ -738,12 +738,23 @@ async function openSprintModal() {
     const m = latest.match(/^v(\d+)\.(\d+)\.\d+$/);
     if (!m) throw new Error(`Unexpected tag format: ${latest}`);
 
-    const year = m[1], sprint = parseInt(m[2]) + 1;
+    const currentYear = new Date().getFullYear();
+    const tagYear  = parseInt(m[1]);
+    const tagSprint = parseInt(m[2]);
+
+    let year, sprint;
+    if (currentYear > tagYear) {
+      year   = currentYear;
+      sprint = 1;
+    } else {
+      year   = tagYear;
+      sprint = tagSprint + 1;
+    }
     nextSprintTag = `v${year}.${sprint}.0`;
 
     document.getElementById("sprint-desc").innerHTML =
       `Create tag <strong>${nextSprintTag}</strong> on HEAD of main (<code>${mainSha.slice(0,7)}</code>)?
-       <br><span style="font-size:0.8rem;color:#8b949e">The next build after this will use sprint ${sprint}.</span>`;
+       <br><span style="font-size:0.8rem;color:#8b949e">The next build after this will use sprint ${year}.${sprint}.</span>`;
     document.getElementById("sprint-btn").disabled = false;
   } catch(e) {
     document.getElementById("sprint-desc").textContent = `Failed to calculate next tag: ${e.message}`;
