@@ -496,12 +496,12 @@ async function approvePendingDeployment(runId, env) {
 }
 
 async function fetchEnv(env, app) {
-  // Query per-app deployment records (task=<application> set by deployinator PR#47)
-  // Falls back to unfiltered if no per-app records exist yet
   const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app)}&per_page=10`);
+  // Only fall back to unfiltered for dev (shared deploys are meaningful there)
+  // For prod, no per-app record = not yet deployed via new deployinator
   const deployments = perApp.length
     ? perApp
-    : await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=10`);
+    : (env === "dev1" ? await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=10`) : []);
   if (!deployments.length) return null;
 
   for (const d of deployments) {
