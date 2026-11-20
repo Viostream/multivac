@@ -547,14 +547,21 @@ async function fetchAllPendingApprovals(env) {
       const wf = run.path?.replace(".github/workflows/", "");
       if (!wf) continue;
 
-      // Skip if already successfully deployed for this exact SHA
+      // Skip if already successfully deployed for this exact SHA,
+      // OR if a newer SHA has since been deployed successfully for this app
       const app = APPS.find(a => a.workflow === wf);
       if (app) {
         const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=5`);
         let alreadyDeployed = false;
-        for (const pd of perApp.filter(pd => pd.sha === d.sha)) {
+        for (const pd of perApp) {
           const st = await ghGet(`repos/${REPO}/deployments/${pd.id}/statuses?per_page=1`);
-          if (st[0]?.state === "success") { alreadyDeployed = true; break; }
+          if (st[0]?.state === "success" && pd.created_at > d.created_at) {
+            // A newer successful deployment exists — this one is obsolete
+            alreadyDeployed = true; break;
+          }
+          if (st[0]?.state === "success" && pd.sha === d.sha) {
+            alreadyDeployed = true; break;
+          }
         }
         if (alreadyDeployed) continue;
       }
