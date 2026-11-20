@@ -659,7 +659,8 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 
   if (!d) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
 
-  const version  = d.version || window._tagMap?.[d.sha7] || d.sha7;
+  const version  = d.version || window._tagMap?.[d.sha7];
+  if (!version) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
   const bc       = badgeClass(d.state);
   const href     = d.log_url || `https://github.com/${REPO}/deployments/activity_log?environment=${env}`;
   const ahead    = aheadCount > 0 ? `<span class="ahead-badge">+${aheadCount} ahead</span>` : "";
@@ -683,12 +684,11 @@ async function load() {
   // Fetch pending approvals once per env, then per-app/env data in parallel
   let appData, pendingProdMap, pendingDevMap;
   try {
-    const [prodPending, devPending] = await Promise.allSettled([
+    const [prodPending] = await Promise.allSettled([
       fetchAllPendingApprovals("prod"),
-      fetchAllPendingApprovals("dev1"),
     ]);
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
-    pendingDevMap  = devPending.status  === "fulfilled" ? devPending.value  : {};
+    pendingDevMap  = {};
     // Build sha->version map from recent tags
     // Exclude sprint boundary tags (patch == 0, e.g. v2026.21.0) — those are markers not builds
     const tags = await ghGet(`repos/${REPO}/tags?per_page=20`);
@@ -730,7 +730,7 @@ async function load() {
     const appDiff = appAhead > 0 && dev1 && prod
       ? `https://github.com/${REPO}/compare/${prod.sha}...${dev1.sha}` : "";
     rows += `<tr><td class="app-name">${app.name}</td>`;
-    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, pendingDev,  app.name);
+    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, null,        app.name);
     rows += renderEnvCell(prod, "prod", 0,        "",      redeploy, pendingProd, app.name);
     rows += `</tr>`;
   }
