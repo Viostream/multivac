@@ -531,9 +531,13 @@ async function fetchAllPendingApprovals(env) {
   // Process serially — only current-HEAD deployments, skip stale
   for (const { d, status } of waiting) {
     try {
-      // Skip if ref HEAD has moved on
+      // Skip if ref no longer exists (deleted branch = stale)
       const headSha = refHeads[d.ref];
-      if (headSha && headSha !== d.sha) continue;
+      if (headSha === undefined) continue;
+
+      // Skip if deployment is older than 7 days
+      const age = Date.now() - new Date(d.created_at).getTime();
+      if (age > 7 * 24 * 60 * 60 * 1000) continue;
 
       const match = status.log_url?.match(/runs\/(\d+)/);
       if (!match) continue;
