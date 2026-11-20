@@ -502,9 +502,9 @@ function badgeClass(state) {
 }
 
 // Fetch all pending approvals for an env.
-// Returns a map of workflow filename -> {runId, sha, ref}
+// Returns a map of workflow filename -> {runId, sha, ref} (most recent per workflow)
 async function fetchAllPendingApprovals(env) {
-  const map = {};
+  const map = {}; // wf -> {runId, sha, ref, createdAt}
   const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=50`);
   const withStatuses = await Promise.allSettled(
     deployments.map(async d => {
@@ -522,7 +522,11 @@ async function fetchAllPendingApprovals(env) {
       const runId = match[1];
       const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
       const wf = run.path?.replace(".github/workflows/", "");
-      if (wf) map[wf] = { runId, sha: d.sha.slice(0, 7), ref: d.ref };
+      if (!wf) return;
+      // Keep the most recent entry per workflow
+      if (!map[wf] || d.created_at > map[wf].createdAt) {
+        map[wf] = { runId, sha: d.sha.slice(0, 7), ref: d.ref, createdAt: d.created_at };
+      }
     })
   );
   return map;
