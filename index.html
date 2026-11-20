@@ -504,7 +504,7 @@ function badgeClass(state) {
 // Fetch all pending approvals for an env.
 // Returns a map of workflow filename -> {runId, sha, ref} (most recent per workflow)
 async function fetchAllPendingApprovals(env) {
-  const map = {}; // wf -> {runId, sha, ref, createdAt}
+  const map = {};
   const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=50`);
   const withStatuses = await Promise.allSettled(
     deployments.map(async d => {
@@ -515,26 +515,45 @@ async function fetchAllPendingApprovals(env) {
   const waiting = withStatuses
     .filter(r => r.status === "fulfilled" && r.value.status?.state === "waiting")
     .map(r => r.value);
-  // Process waiting deployments serially to avoid rate limiting
+
+  // Resolve current HEAD SHA per unique ref to filter stale deployments
+  const refs = [...new Set(waiting.map(({ d }) => d.ref))];
+  const refHeads = {};
+  await Promise.allSettled(refs.map(async ref => {
+    try {
+      const r = await ghGet(`repos/${REPO}/git/ref/heads/${encodeURIComponent(ref)}`).catch(() =>
+        ghGet(`repos/${REPO}/git/ref/tags/${encodeURIComponent(ref)}`)
+      );
+      refHeads[ref] = r.object.sha;
+    } catch {}
+  }));
+
+  // Process serially — only current-HEAD deployments, skip stale
   for (const { d, status } of waiting) {
     try {
+      // Skip if ref HEAD has moved on
+      const headSha = refHeads[d.ref];
+      if (headSha && headSha !== d.sha) continue;
+
       const match = status.log_url?.match(/runs\/(\d+)/);
       if (!match) continue;
       const runId = match[1];
       const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
       const wf = run.path?.replace(".github/workflows/", "");
       if (!wf) continue;
+
+      // Skip if already successfully deployed for this exact SHA
       const app = APPS.find(a => a.workflow === wf);
       if (app) {
-        const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=10`);
-        const sameSha = perApp.filter(pd => pd.sha === d.sha);
+        const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=5`);
         let alreadyDeployed = false;
-        for (const pd of sameSha) {
+        for (const pd of perApp.filter(pd => pd.sha === d.sha)) {
           const st = await ghGet(`repos/${REPO}/deployments/${pd.id}/statuses?per_page=1`);
           if (st[0]?.state === "success") { alreadyDeployed = true; break; }
         }
         if (alreadyDeployed) continue;
       }
+
       if (!map[wf] || d.created_at > map[wf].createdAt) {
         map[wf] = { runId, sha: d.sha.slice(0, 7), ref: d.ref, createdAt: d.created_at };
       }
