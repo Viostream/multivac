@@ -110,6 +110,46 @@
     .app-name { font-weight: 600; white-space: nowrap; }
     .cell { text-align: center; }
 
+    /* ── mobile ── */
+    @media (max-width: 600px) {
+      body { padding: 12px; }
+      h1 { font-size: 1rem; }
+      .toolbar { gap: 6px; }
+      .btn, .btn-deploy, .btn-promote, .btn-sprint { font-size: 0.75rem; padding: 4px 8px; }
+
+      table, thead, tbody, th, td, tr { display: block; }
+      thead { display: none; }
+
+      tbody tr {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 10px;
+      }
+      tbody tr:hover { background: #161b22; }
+
+      td {
+        border: none;
+        padding: 4px 0;
+        text-align: left !important;
+      }
+      td.app-name {
+        font-size: 0.95rem;
+        margin-bottom: 6px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #21262d;
+      }
+      td.cell::before {
+        content: attr(data-env) ": ";
+        font-size: 0.7rem;
+        color: #8b949e;
+        display: inline-block;
+        width: 60px;
+      }
+      td[colspan="2"] { text-align: left !important; }
+    }
+
     .version-badge {
       display: inline-block;
       padding: 3px 8px;
@@ -122,6 +162,18 @@
     .badge-success { background: #1a4a1a; color: #3fb950; border: 1px solid #238636; }
     .badge-failure { background: #4a1a1a; color: #f85149; border: 1px solid #da3633; }
     .badge-pending { background: #2a2a1a; color: #d29922; border: 1px solid #9e6a03; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border: 2px solid #d29922;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
     .badge-waiting { background: #2a1f00; color: #e3b341; border: 1px solid #bb8009; cursor: pointer; }
     .badge-waiting:hover { background: #bb8009; color: #fff; }
     .badge-none    { background: #161b22; color: #484f58; border: 1px solid #30363d; }
@@ -680,38 +732,40 @@ async function loadBranches() {
 }
 
 function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, appName) {
-  if (!d && !pendingRunId) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
+  const envLabel = env === "prod" ? "Prod" : "Dev";
+  if (!d && !pendingRunId) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
 
   // Pending approval — amber, clickable to approve
   if (pendingRunId) {
     const { runId, sha } = pendingRunId;
-    // Find version for this SHA from the tags cache (populated during load)
     const version = window._tagMap?.[sha] || sha;
-    const label = `⏳ ${version}`;
     return `
-      <td class="cell">
+      <td class="cell" data-env="${envLabel}">
         <span class="version-badge badge-waiting"
           onclick="openApproveModal('${runId}','${appName}','${env}','${version}')"
           title="Pending approval — click to approve">
-          ${label}
+          ⏳ ${version}
         </span>
         <span class="meta">waiting for approval</span>
       </td>`;
   }
 
-  if (!d) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
+  if (!d) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
 
   const version  = d.version || window._tagMap?.[d.sha7];
-  if (!version) return `<td class="cell"><span class="version-badge badge-none">no data</span></td>`;
+  if (!version) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
+
+  const isActive = ["in_progress","pending","waiting","queued"].includes(d.state);
   const bc       = badgeClass(d.state);
   const href     = d.log_url || `https://github.com/${REPO}/deployments/activity_log?environment=${env}`;
   const ahead    = aheadCount > 0 ? `<span class="ahead-badge">+${aheadCount} ahead</span>` : "";
   const diff     = diffUrl && aheadCount > 0
     ? `<a class="diff-link" href="${diffUrl}" target="_blank">view diff →</a>` : "";
+  const spin     = isActive ? `<span class="spinner"></span>` : "";
 
   return `
-    <td class="cell">
-      <a class="version-badge ${bc}" href="${href}" target="_blank">${version}</a>${ahead}
+    <td class="cell" data-env="${envLabel}">
+      <a class="version-badge ${bc}" href="${href}" target="_blank">${spin}${version}</a>${ahead}
       <span class="meta">${relativeTime(d.when)}</span>
       ${diff}
       <a class="redeploy-btn" href="${redeployUrl}" target="_blank">↺ redeploy</a>
@@ -1041,7 +1095,27 @@ document.getElementById("modal").addEventListener("click", e => {
 
 load();
 // removed: loadBranches() — branch dispatch no longer used
-setInterval(load, 120_000);
+
+// Smart polling: fast when something is in-progress, slow otherwise
+let _pollTimer = null;
+function scheduleNextPoll(hasActivity) {
+  clearTimeout(_pollTimer);
+  _pollTimer = setTimeout(async () => {
+    await load();
+  }, hasActivity ? 10_000 : 120_000);
+}
+
+// Patch load() to schedule next poll based on whether anything is in-progress
+const _origLoad = load;
+window.load = async function() {
+  await _origLoad();
+  // Check if any cell has in-progress state by looking at the DOM
+  const hasActivity = !!document.querySelector(".badge-pending, .spinner");
+  scheduleNextPoll(hasActivity);
+  // Update the last-updated indicator with next refresh time
+  const secs = hasActivity ? 10 : 120;
+  document.getElementById("last-updated").textContent += ` · refreshing in ${secs}s`;
+};
 </script>
 </body>
 </html>
