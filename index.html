@@ -523,13 +523,17 @@ async function fetchAllPendingApprovals(env) {
       const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
       const wf = run.path?.replace(".github/workflows/", "");
       if (!wf) return;
-      // Check if a newer successful deployment already exists for this app+env
-      // If so, this waiting deployment is a ghost — skip it
-      const app = APPS.find(a => a.workflow === wf);
+      // Skip if a successful per-app deployment already exists for this exact SHA
+      // (don't skip just because a newer deploy happened — different branches coexist)
       if (app) {
-        const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=5`);
-        const hasNewerSuccess = perApp.some(pd => pd.created_at > d.created_at);
-        if (hasNewerSuccess) return;
+        const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=10`);
+        const alreadyDeployed = await Promise.allSettled(
+          perApp.filter(pd => pd.sha === d.sha).map(async pd => {
+            const st = await ghGet(`repos/${REPO}/deployments/${pd.id}/statuses?per_page=1`);
+            return st[0]?.state === "success";
+          })
+        );
+        if (alreadyDeployed.some(r => r.status === "fulfilled" && r.value)) return;
       }
       // Keep the most recent entry per workflow
       if (!map[wf] || d.created_at > map[wf].createdAt) {
