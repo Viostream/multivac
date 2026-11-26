@@ -626,8 +626,14 @@ let _waitingRunsCacheTime = 0;
 async function fetchWaitingRuns() {
   const now = Date.now();
   if (_waitingRunsCache && now - _waitingRunsCacheTime < 30_000) return _waitingRunsCache;
-  const data = await ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`);
-  _waitingRunsCache = (data.workflow_runs || []).filter(r => {
+  const [waitingResp, activeResp] = await Promise.all([
+    ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`),
+    ghGet(`repos/${REPO}/actions/runs?status=in_progress&per_page=50`),
+  ]);
+  _waitingRunsCache = [
+    ...(waitingResp.workflow_runs || []).map(r => ({ ...r, _phase: "waiting" })),
+    ...(activeResp.workflow_runs  || []).map(r => ({ ...r, _phase: "in_progress" })),
+  ].filter(r => {
     const wf = r.path?.replace(".github/workflows/", "");
     return wf && APPS.find(a => a.workflow === wf);
   });
@@ -790,9 +796,33 @@ async function loadBranches() {
   }
 }
 
-function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, appName) {
+function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, appName, workflow) {
   const envLabel = env === "prod" ? "Prod" : "Dev";
-  if (!d && !pendingRunId) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
+
+  // Check if there's an active run for this app right now
+  const active = window._activeRunMap?.[workflow];
+  const activeForEnv = active && (
+    (env === "dev1" && active.phase === "in_progress" && active.ref !== "main") ||
+    (env === "dev1" && active.phase === "waiting") ||
+    (env === "prod" && active.phase === "in_progress")
+  );
+
+  if (!d && !pendingRunId && !activeForEnv) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
+
+  // Active run overlay — show spinner + what's deploying
+  if (activeForEnv) {
+    const runUrl = `https://github.com/${REPO}/actions/runs/${active.runId}`;
+    const label = active.phase === "waiting" ? "⏳ waiting" : "deploying";
+    const prevVersion = d ? (d.version || window._tagMap?.[d.sha7]) : null;
+    return `
+      <td class="cell" data-env="${envLabel}">
+        <a class="version-badge badge-pending" href="${runUrl}" target="_blank">
+          <span class="spinner"></span>${active.ref}
+        </a>
+        ${prevVersion ? `<span class="meta">was ${prevVersion}</span>` : ""}
+        <span class="meta">${label}</span>
+      </td>`;
+  }
 
   // Pending approval — amber, clickable to approve
   if (pendingRunId) {
@@ -840,11 +870,20 @@ async function load() {
   // Fetch pending approvals once per env, then per-app/env data in parallel
   let appData, pendingProdMap, pendingDevMap;
   try {
-    const [prodPending] = await Promise.allSettled([
+    const [prodPending, activeRuns] = await Promise.allSettled([
       fetchAllPendingApprovals("prod"),
+      fetchWaitingRuns(),
     ]);
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
     pendingDevMap  = {};
+
+    // Build active run map: workflow -> {phase, ref, sha, runId} for overlay
+    const allActiveRuns = activeRuns.status === "fulfilled" ? activeRuns.value : [];
+    window._activeRunMap = {};
+    for (const r of allActiveRuns) {
+      const wf = r.path?.replace(".github/workflows/", "");
+      if (wf) window._activeRunMap[wf] = { phase: r._phase, ref: r.head_branch, sha: r.head_sha.slice(0,7), runId: r.id };
+    }
     // Build sha->version map from recent tags
     // Exclude sprint boundary tags (patch == 0, e.g. v2026.21.0) — those are markers not builds
     const tags = await ghGet(`repos/${REPO}/tags?per_page=20`);
@@ -886,8 +925,8 @@ async function load() {
     const appDiff = appAhead > 0 && dev1 && prod
       ? `https://github.com/${REPO}/compare/${prod.sha}...${dev1.sha}` : "";
     rows += `<tr><td class="app-name">${app.name}</td>`;
-    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, null,        app.name);
-    rows += renderEnvCell(prod, "prod", appAhead, appDiff, redeploy, pendingProd, app.name);
+    rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, null,        app.name, app.workflow);
+    rows += renderEnvCell(prod, "prod", appAhead, appDiff, redeploy, pendingProd, app.name, app.workflow);
     rows += `</tr>`;
   }
 
