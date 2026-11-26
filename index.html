@@ -673,7 +673,6 @@ function invalidatePendingCache() {
   _waitingRunsCacheTime = 0;
   window._depsCache = {};
 }
-}
 
 async function approvePendingDeployment(runId, env) {
   return fetch(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/pending_deployments`, {
