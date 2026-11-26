@@ -1151,7 +1151,7 @@ async function loadRerunTab() {
   // Build ref list: branches + recent tags (skip sprint boundary tags patch==0)
   const refs = [
     ...branchesResp.filter(b => b.name !== "main").map(b => ({ name: b.name, sha: b.commit.sha, isTag: false })),
-    ...tagsResp.filter(t => !t.name.match(/^v\d+\.\d+\.0$/)).map(t => ({ name: t.name, sha: t.commit.sha, isTag: true })),
+    ...tagsResp.map(t => ({ name: t.name, sha: t.commit.sha, isTag: true })),
   ];
 
   const byRef = {};
