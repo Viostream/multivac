@@ -74,6 +74,13 @@
     }
     .btn-sprint:hover { background: #8957e5; color: #fff; }
 
+    .btn-dispatch {
+      background: #1a3a2a;
+      color: #56d364;
+      border-color: #2ea043;
+    }
+    .btn-dispatch:hover { background: #2ea043; color: #fff; }
+
     .updated { font-size: 0.75rem; color: #484f58; margin-left: auto; }
 
     /* ── header ── */
@@ -320,6 +327,28 @@
     .ref-option:hover { border-color: #58a6ff; background: #161b22; }
     .ref-option.selected { border-color: #238636; background: #1a4a1a; }
 
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #30363d;
+    }
+    .tab-btn {
+      padding: 6px 16px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 0.85rem;
+      margin-bottom: -1px;
+    }
+    .tab-btn.active { color: #e6edf3; border-bottom-color: #58a6ff; }
+    .tab-btn:hover { color: #e6edf3; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .tab-desc { font-size: 0.82rem; color: #8b949e; margin-bottom: 10px; }
+
     .modal .app-item {
       font-size: 0.8rem;
       padding: 4px 8px;
@@ -366,8 +395,7 @@
 </div>
 
 <div class="toolbar">
-  <button class="btn btn-deploy" id="deploy-btn" onclick="openDeployModal()">✅ Approve Dev</button>
-  <button class="btn btn-promote" id="promote-btn" onclick="openPromoteModal()" style="display:none">✅ Approve Prod</button>
+  <button class="btn btn-deploy" onclick="openDeployModal()">🚀 Deploy</button>
   <button class="btn btn-sprint" onclick="openSprintModal()">🏁 Start Sprint</button>
   <button class="btn" onclick="load()">↻ Refresh</button>
   <button class="btn" onclick="resetToken()">🔑 Token</button>
@@ -419,7 +447,52 @@
   </div>
 </div>
 
-<!-- approve modal -->
+<!-- deploy modal -->
+<div class="modal-backdrop" id="deploy-modal">
+  <div class="modal" style="max-width:540px">
+    <h2>Deploy</h2>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('approve-dev')">Approve Dev</button>
+      <button class="tab-btn" onclick="switchTab('approve-prod')">Approve Prod</button>
+      <button class="tab-btn" onclick="switchTab('rerun')">Re-run</button>
+      <button class="tab-btn" onclick="switchTab('branch')">Branch</button>
+    </div>
+
+    <!-- Approve Dev -->
+    <div class="tab-panel active" id="tab-approve-dev">
+      <p class="tab-desc" id="approve-dev-desc">Loading…</p>
+      <div id="approve-dev-list"></div>
+    </div>
+
+    <!-- Approve Prod -->
+    <div class="tab-panel" id="tab-approve-prod">
+      <p class="tab-desc" id="approve-prod-desc">Loading…</p>
+      <div id="approve-prod-list"></div>
+    </div>
+
+    <!-- Re-run cancelled/failed -->
+    <div class="tab-panel" id="tab-rerun">
+      <p class="tab-desc" id="rerun-desc">Loading…</p>
+      <div id="rerun-list"></div>
+    </div>
+
+    <!-- Branch dispatch -->
+    <div class="tab-panel" id="tab-branch">
+      <p class="tab-desc" id="branch-desc">Loading…</p>
+      <div id="branch-list"></div>
+      <div id="branch-apps" style="margin-top:10px"></div>
+    </div>
+
+    <div class="dispatch-status" id="deploy-modal-status"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeDeployModal()">Close</button>
+      <button class="btn-confirm" id="deploy-modal-confirm" onclick="confirmDeployModal()" disabled>Go</button>
+    </div>
+  </div>
+</div>
+
+<!-- approve modal (cell click) -->
 <div class="modal-backdrop" id="approve-modal">
   <div class="modal">
     <h2 id="approve-title">Approve deployment</h2>
@@ -428,18 +501,6 @@
     <div class="actions">
       <button class="btn" onclick="closeApproveModal()">Cancel</button>
       <button class="btn-confirm" id="approve-btn" onclick="confirmApprove()">Approve</button>
-    </div>
-  </div>
-</div>
-<div class="modal-backdrop" id="modal">
-  <div class="modal">
-    <h2 id="modal-title">Deploy to Dev</h2>
-    <p id="modal-desc"></p>
-    <div class="app-grid" id="modal-apps"></div>
-    <div class="dispatch-status" id="dispatch-status"></div>
-    <div class="actions">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn-confirm" id="confirm-btn" onclick="confirmDeploy()">Deploy</button>
     </div>
   </div>
 </div>
@@ -473,7 +534,6 @@ const OCTOPUS_APPS = [
 ];
 
 let currentDeployApps = APPS;
-let currentDeployBranch = "main";
 
 function getToken() { return localStorage.getItem("gh_token") || ""; }
 
@@ -726,7 +786,7 @@ async function loadBranches() {
       `<option value="${b}">${b}</option>`
     ).join("");
 
-    document.getElementById("deploy-btn").disabled = false;
+    document.getElementById("deploy-btn")?.setAttribute("disabled", false);
   } catch (e) {
     document.getElementById("branch-select").innerHTML = `<option>Failed to load branches</option>`;
   }
@@ -817,8 +877,8 @@ async function load() {
   const diffDevProd = first.prod && first.dev1
     ? `https://github.com/${REPO}/compare/${first.prod.sha}...${first.dev1.sha}` : "";
 
-  document.getElementById("promote-btn").style.display =
-    devProdAhead > 0 ? "inline-block" : "none";
+  document.getElementById("promote-btn")?.style && (document.getElementById("promote-btn").style.display =
+    devProdAhead > 0 ? "inline-block" : "none");
 
   let rows = "";
   for (const { app, dev1, prod, pendingProd, pendingDev } of appData) {
@@ -976,46 +1036,59 @@ document.getElementById("approve-modal").addEventListener("click", e => {
   if (e.target === e.currentTarget) closeApproveModal();
 });
 
-// ── deploy modal ──
+// ── unified deploy modal ──
 
-function closeModal() {
-  document.getElementById("modal").classList.remove("open");
+let _deployTab       = "approve-dev";
+let _deployAction    = null; // {type, env, ref, apps, runIds, branch}
+
+function openDeployModal() {
+  document.getElementById("deploy-modal-status").innerHTML = "";
+  document.getElementById("deploy-modal-confirm").disabled = true;
+  document.getElementById("deploy-modal-confirm").textContent = "Go";
+  _deployAction = null;
+  document.getElementById("deploy-modal").classList.add("open");
+  switchTab("approve-dev");
 }
 
-let currentDeployEnv  = "dev1";
-let currentDeployRef  = null;
-
-async function openDeployModal() {
-  currentDeployEnv = "dev1";
-  document.getElementById("modal-title").textContent = "Approve Dev Deployments";
-  document.getElementById("modal-desc").textContent = "Checking pending deployments…";
-  document.getElementById("modal-apps").innerHTML = "";
-  document.getElementById("dispatch-status").innerHTML = "";
-  document.getElementById("confirm-btn").disabled = true;
-  document.getElementById("confirm-btn").textContent = "Approve";
-  document.getElementById("modal").classList.add("open");
-  await populateApproveModal("dev1");
+function closeDeployModal() {
+  document.getElementById("deploy-modal").classList.remove("open");
 }
 
-async function openPromoteModal() {
-  currentDeployEnv = "prod";
-  document.getElementById("modal-title").textContent = "Approve Prod Deployments";
-  document.getElementById("modal-desc").textContent = "Checking pending deployments…";
-  document.getElementById("modal-apps").innerHTML = "";
-  document.getElementById("dispatch-status").innerHTML = "";
-  document.getElementById("confirm-btn").disabled = true;
-  document.getElementById("confirm-btn").textContent = "Approve";
-  document.getElementById("modal").classList.add("open");
-  await populateApproveModal("prod");
+document.getElementById("deploy-modal").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeDeployModal();
+});
+
+function switchTab(tab) {
+  _deployTab = tab;
+  _deployAction = null;
+  document.getElementById("deploy-modal-confirm").disabled = true;
+  document.getElementById("deploy-modal-status").innerHTML = "";
+  document.querySelectorAll(".tab-btn").forEach((b, i) => {
+    b.classList.toggle("active", ["approve-dev","approve-prod","rerun","branch"][i] === tab);
+  });
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  document.getElementById(`tab-${tab}`).classList.add("active");
+
+  if (tab === "approve-dev")  loadApproveTab("dev1");
+  if (tab === "approve-prod") loadApproveTab("prod");
+  if (tab === "rerun")        loadRerunTab();
+  if (tab === "branch")       loadBranchTab();
 }
 
-async function populateApproveModal(env) {
+// ── Approve tab ──
+
+async function loadApproveTab(env) {
+  const descEl = document.getElementById(`approve-${env === "dev1" ? "dev" : "prod"}-desc`);
+  const listEl = document.getElementById(`approve-${env === "dev1" ? "dev" : "prod"}-list`);
+  descEl.textContent = "Checking pending deployments…";
+  listEl.innerHTML = "";
+
   const pending = await fetchAllPendingApprovals(env);
   window._lastPending = window._lastPending || {};
   window._lastPending[env] = pending;
 
   if (!Object.keys(pending).length) {
-    document.getElementById("modal-desc").textContent = "No pending deployments waiting for approval.";
+    descEl.textContent = "No pending deployments waiting for approval.";
     return;
   }
 
@@ -1027,73 +1100,209 @@ async function populateApproveModal(env) {
     if (app) byRef[info.ref].apps.push(app);
   }
   const refs = Object.values(byRef);
+  descEl.textContent = refs.length === 1
+    ? `Approve ${env === "prod" ? "prod" : "dev"} for ${refs[0].ref}:`
+    : "Select a build to approve:";
 
-  if (refs.length === 1) {
-    currentDeployRef  = refs[0].ref;
-    currentDeployApps = refs[0].apps;
-    document.getElementById("modal-desc").textContent =
-      `Approve ${env === "prod" ? "prod" : "dev"} deployments for ${refs[0].ref}:`;
-    document.getElementById("modal-apps").innerHTML =
-      refs[0].apps.map(a => `<div class="app-item">${a.name}</div>`).join("");
-    document.getElementById("confirm-btn").disabled = false;
-    return;
-  }
-
-  // Multiple refs — show picker
-  currentDeployRef = null;
-  document.getElementById("modal-desc").textContent = "Multiple builds pending — select one to approve:";
-  document.getElementById("modal-apps").innerHTML = refs.map(r => `
-    <div class="ref-option" onclick="selectRef('${r.ref}')" id="refopt-${r.ref.replace(/[^a-z0-9]/gi,'_')}">
+  listEl.innerHTML = refs.map(r => `
+    <div class="ref-option" onclick="selectApproveRef('${env}','${r.ref}')" id="refopt-${r.ref.replace(/[^a-z0-9]/gi,'_')}">
       <strong>${r.ref}</strong>
       <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${r.sha} · ${r.apps.length} app${r.apps.length > 1 ? "s" : ""}</span>
     </div>`).join("");
+
+  if (refs.length === 1) selectApproveRef(env, refs[0].ref);
 }
 
-function selectRef(ref) {
-  currentDeployRef  = ref;
-  currentDeployApps = APPS.filter(a => window._lastPending?.[currentDeployEnv]?.[a.workflow]?.ref === ref);
+function selectApproveRef(env, ref) {
   document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
   document.getElementById(`refopt-${ref.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
-  document.getElementById("confirm-btn").disabled = false;
+  _deployAction = { type: "approve", env, ref, apps: APPS.filter(a => window._lastPending?.[env]?.[a.workflow]?.ref === ref) };
+  document.getElementById("deploy-modal-confirm").disabled = false;
+  document.getElementById("deploy-modal-confirm").textContent = "Approve";
 }
 
-async function confirmDeploy() {
-  const confirmBtn = document.getElementById("confirm-btn");
-  const statusEl   = document.getElementById("dispatch-status");
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = "Approving…";
+// ── Re-run tab ──
+
+async function loadRerunTab() {
+  const descEl = document.getElementById("rerun-desc");
+  const listEl = document.getElementById("rerun-list");
+  descEl.textContent = "Looking for cancelled/failed runs…";
+  listEl.innerHTML = "";
+
+  // Get all branches, find ones with cancelled/failed runs on current HEAD
+  const branches = await ghGet(`repos/${REPO}/branches?per_page=100`);
+  const candidates = branches.filter(b => b.name !== "main");
+
+  const runs = [];
+  await Promise.allSettled(candidates.map(async b => {
+    const branchRuns = await ghGet(`repos/${REPO}/actions/runs?branch=${encodeURIComponent(b.name)}&per_page=20`);
+    // Group by workflow, keep latest per workflow
+    const byWf = {};
+    for (const r of branchRuns.workflow_runs) {
+      const wf = r.path?.replace(".github/workflows/","");
+      if (!wf || !APPS.find(a => a.workflow === wf)) continue;
+      if (!byWf[wf] || r.created_at > byWf[wf].created_at) byWf[wf] = r;
+    }
+    for (const r of Object.values(byWf)) {
+      if (r.head_sha !== b.commit.sha) continue; // stale
+      if (r.conclusion === "cancelled" || r.conclusion === "failure") {
+        runs.push({ branch: b.name, sha: b.commit.sha.slice(0,7), runId: r.id, name: r.name, conclusion: r.conclusion });
+      }
+    }
+  }));
+
+  if (!runs.length) {
+    descEl.textContent = "No cancelled or failed runs on current branch HEADs.";
+    return;
+  }
+
+  // Group by branch
+  const byBranch = {};
+  for (const r of runs) {
+    if (!byBranch[r.branch]) byBranch[r.branch] = { branch: r.branch, sha: r.sha, runs: [] };
+    byBranch[r.branch].runs.push(r);
+  }
+
+  descEl.textContent = "Select a branch to re-run all cancelled/failed jobs:";
+  listEl.innerHTML = Object.values(byBranch).map(b => `
+    <div class="ref-option" onclick="selectRerun('${b.branch}')" id="rerun-${b.branch.replace(/[^a-z0-9]/gi,'_')}">
+      <strong>${b.branch}</strong>
+      <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${b.sha} · ${b.runs.length} app${b.runs.length > 1 ? "s" : ""} ${b.runs[0].conclusion}</span>
+    </div>`).join("");
+}
+
+function selectRerun(branch) {
+  document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
+  document.getElementById(`rerun-${branch.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
+  const byBranch = window._rerunData?.[branch];
+  _deployAction = { type: "rerun", branch };
+  document.getElementById("deploy-modal-confirm").disabled = false;
+  document.getElementById("deploy-modal-confirm").textContent = "Re-run";
+}
+
+// ── Branch dispatch tab ──
+
+async function loadBranchTab() {
+  const descEl = document.getElementById("branch-desc");
+  const listEl = document.getElementById("branch-list");
+  const appsEl = document.getElementById("branch-apps");
+  descEl.textContent = "Loading branches…";
+  listEl.innerHTML = "";
+  appsEl.innerHTML = "";
+
+  const branches = await ghGet(`repos/${REPO}/branches?per_page=100`);
+  const nonMain  = branches.filter(b => b.name !== "main");
+
+  // Find branches ahead of main
+  const comparisons = await Promise.allSettled(
+    nonMain.map(async b => {
+      const c = await ghGet(`repos/${REPO}/compare/main...${encodeURIComponent(b.name)}`);
+      return { branch: b.name, sha: b.commit.sha.slice(0,7), ahead: c.ahead_by, files: (c.files||[]).map(f=>f.filename) };
+    })
+  );
+  const ahead = comparisons.filter(r => r.status === "fulfilled" && r.value.ahead > 0).map(r => r.value);
+
+  if (!ahead.length) { descEl.textContent = "No branches ahead of main."; return; }
+
+  window._branchData = {};
+  for (const b of ahead) window._branchData[b.branch] = b;
+
+  descEl.textContent = "Select a branch to dispatch to Dev:";
+  listEl.innerHTML = ahead.map(b => `
+    <div class="ref-option" onclick="selectBranch('${b.branch}')" id="branch-${b.branch.replace(/[^a-z0-9]/gi,'_')}">
+      <strong>${b.branch}</strong>
+      <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${b.sha} · +${b.ahead} ahead</span>
+    </div>`).join("");
+}
+
+function selectBranch(branch) {
+  document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
+  document.getElementById(`branch-${branch.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
+
+  const data = window._branchData?.[branch];
+  const affectedApps = data ? APPS.filter(app => app.paths.some(p => data.files.some(f => f.startsWith(p)))) : APPS;
+
+  document.getElementById("branch-apps").innerHTML = affectedApps.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  _deployAction = { type: "dispatch", branch, apps: affectedApps };
+  document.getElementById("deploy-modal-confirm").disabled = false;
+  document.getElementById("deploy-modal-confirm").textContent = "Dispatch";
+}
+
+// ── Confirm ──
+
+async function confirmDeployModal() {
+  const btn      = document.getElementById("deploy-modal-confirm");
+  const statusEl = document.getElementById("deploy-modal-status");
+  btn.disabled   = true;
   statusEl.innerHTML = "";
 
-  const pending = await fetchAllPendingApprovals(currentDeployEnv);
-  const toApprove = currentDeployApps.filter(app =>
-    pending[app.workflow]?.ref === currentDeployRef
-  );
+  if (!_deployAction) return;
 
-  const results = await Promise.allSettled(
-    toApprove.map(app =>
-      approvePendingDeployment(pending[app.workflow].runId, currentDeployEnv)
-        .then(() => ({ app: app.name, ok: true }))
-        .catch(e  => ({ app: app.name, ok: false, err: e.message }))
-    )
-  );
+  if (_deployAction.type === "approve") {
+    btn.textContent = "Approving…";
+    const pending = await fetchAllPendingApprovals(_deployAction.env);
+    const results = await Promise.allSettled(
+      _deployAction.apps.map(app =>
+        approvePendingDeployment(pending[app.workflow].runId, _deployAction.env)
+          .then(() => ({ app: app.name, ok: true }))
+          .catch(e  => ({ app: app.name, ok: false, err: e.message }))
+      )
+    );
+    showResults(results, statusEl, btn);
+  }
 
+  if (_deployAction.type === "rerun") {
+    btn.textContent = "Re-running…";
+    // Find all cancelled/failed run IDs for this branch from the DOM
+    const listEl = document.getElementById("rerun-list");
+    const branch = _deployAction.branch;
+    // Re-fetch to get run IDs
+    const branchRuns = await ghGet(`repos/${REPO}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=20`);
+    const sha = branchRuns.workflow_runs[0]?.head_sha;
+    const toRerun = branchRuns.workflow_runs.filter(r =>
+      r.head_sha === sha &&
+      (r.conclusion === "cancelled" || r.conclusion === "failure") &&
+      APPS.find(a => a.workflow === r.path?.replace(".github/workflows/",""))
+    );
+    const results = await Promise.allSettled(
+      toRerun.map(r =>
+        fetch(`https://api.github.com/repos/${REPO}/actions/runs/${r.id}/rerun-failed-jobs`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${getToken()}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" }
+        }).then(res => { if (!res.ok) throw new Error(res.status); return { app: r.name, ok: true }; })
+         .catch(e => ({ app: r.name, ok: false, err: e.message }))
+      )
+    );
+    showResults(results, statusEl, btn);
+  }
+
+  if (_deployAction.type === "dispatch") {
+    btn.textContent = "Dispatching…";
+    const results = await Promise.allSettled(
+      _deployAction.apps.map(app =>
+        ghPost(`repos/${REPO}/actions/workflows/${app.workflow}/dispatches`, { ref: _deployAction.branch })
+          .then(() => ({ app: app.name, ok: true }))
+          .catch(e  => ({ app: app.name, ok: false, err: e.message }))
+      )
+    );
+    showResults(results, statusEl, btn);
+  }
+}
+
+function showResults(results, statusEl, btn) {
   const values    = results.map(r => r.value || r.reason);
   const failed    = values.filter(v => !v.ok);
   const succeeded = values.filter(v => v.ok);
-
   let html = "";
-  if (succeeded.length) html += `<span class="ok">✓ Approved ${succeeded.length} deployment${succeeded.length > 1 ? "s" : ""}</span><br>`;
+  if (succeeded.length) html += `<span class="ok">✓ ${succeeded.length} succeeded</span><br>`;
   if (failed.length)    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
-
   statusEl.innerHTML = html;
-  confirmBtn.textContent = "Done";
-  if (!failed.length) setTimeout(() => { closeModal(); load(); }, 2000);
+  btn.textContent = "Done";
+  if (!failed.length) setTimeout(() => { closeDeployModal(); load(); }, 2000);
 }
 
-// Close modal on backdrop click
-document.getElementById("modal").addEventListener("click", e => {
-  if (e.target === e.currentTarget) closeModal();
-});
+// promote button still used for amber cell prod approval shortcut
+function openPromoteModal() { openDeployModal(); switchTab("approve-prod"); }
 
 load();
 // removed: loadBranches() — branch dispatch no longer used
