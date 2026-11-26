@@ -829,7 +829,7 @@ async function load() {
       ? `https://github.com/${REPO}/compare/${prod.sha}...${dev1.sha}` : "";
     rows += `<tr><td class="app-name">${app.name}</td>`;
     rows += renderEnvCell(dev1, "dev1", appAhead, appDiff, redeploy, null,        app.name);
-    rows += renderEnvCell(prod, "prod", 0,        "",      redeploy, pendingProd, app.name);
+    rows += renderEnvCell(prod, "prod", appAhead, appDiff, redeploy, pendingProd, app.name);
     rows += `</tr>`;
   }
 
