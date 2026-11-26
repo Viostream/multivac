@@ -626,17 +626,10 @@ let _waitingRunsCacheTime = 0;
 async function fetchWaitingRuns() {
   const now = Date.now();
   if (_waitingRunsCache && now - _waitingRunsCacheTime < 30_000) return _waitingRunsCache;
-  const [waitingResp, activeResp] = await Promise.all([
-    ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`),
-    ghGet(`repos/${REPO}/actions/runs?status=in_progress&per_page=50`),
-  ]);
-  _waitingRunsCache = [
-    ...(waitingResp.workflow_runs || []).map(r => ({ ...r, _phase: "waiting" })),
-    ...(activeResp.workflow_runs  || []).map(r => ({ ...r, _phase: "in_progress" })),
-  ].filter(r => {
-    const wf = r.path?.replace(".github/workflows/", "");
-    return wf && APPS.find(a => a.workflow === wf);
-  });
+  const data = await ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`);
+  _waitingRunsCache = (data.workflow_runs || [])
+    .filter(r => { const wf = r.path?.replace(".github/workflows/", ""); return wf && APPS.find(a => a.workflow === wf); })
+    .map(r => ({ ...r, _phase: "waiting" }));
   _waitingRunsCacheTime = now;
   return _waitingRunsCache;
 }
@@ -801,22 +794,25 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 
   // Check if there's an active run for this app right now
   const active = window._activeRunMap?.[workflow];
-  const activeForEnv = active && (active.phase === "in_progress" || active.phase === "waiting");
+  // Active run = waiting for approval only (in_progress shown via deployment record)
+  const isTag = active?.ref?.match(/^v\d+\.\d+/);
+  const isMain = active?.ref === "main";
+  const activeForEnv = active && active.phase === "waiting" && (
+    (env === "dev1" && !isMain) ||
+    (env === "prod" && (isMain || isTag))
+  );
 
   if (!d && !pendingRunId && !activeForEnv) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
 
   // Active run overlay — show spinner + what's deploying
   if (activeForEnv) {
     const runUrl = `https://github.com/${REPO}/actions/runs/${active.runId}`;
-    const label = active.phase === "waiting" ? "⏳ waiting" : "deploying";
     const prevVersion = d ? (d.version || window._tagMap?.[d.sha7]) : null;
     return `
       <td class="cell" data-env="${envLabel}">
-        <a class="version-badge badge-pending" href="${runUrl}" target="_blank">
-          <span class="spinner"></span>${active.ref}
-        </a>
+        <a class="version-badge badge-waiting" href="${runUrl}" target="_blank">⏳ ${active.ref}</a>
         ${prevVersion ? `<span class="meta">was ${prevVersion}</span>` : ""}
-        <span class="meta">${label}</span>
+        <span class="meta">waiting for approval</span>
       </td>`;
   }
 
@@ -872,11 +868,10 @@ async function load() {
     ]);
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
     pendingDevMap  = {};
-
-    // Build active run map: workflow -> {phase, ref, sha, runId}
+    // Build active run map for waiting runs only (not in_progress — deployment record handles that)
     const allActiveRuns = activeRuns.status === "fulfilled" ? activeRuns.value : [];
     window._activeRunMap = {};
-    for (const r of allActiveRuns) {
+    for (const r of allActiveRuns.filter(r => r._phase === "waiting")) {
       const wf = r.path?.replace(".github/workflows/", "");
       if (!wf) continue;
       window._activeRunMap[wf] = { phase: r._phase, ref: r.head_branch, sha: r.head_sha.slice(0,7), runId: r.id };
