@@ -615,76 +615,28 @@ function badgeClass(state) {
   return "badge-none";
 }
 
-// Fetch all pending approvals for an env.
-// Returns a map of workflow filename -> {runId, sha, ref} (most recent per workflow)
+// Fetch all pending approvals for an env using the Actions runs API — single call, fast.
+// Returns a map of workflow filename -> {runId, sha, ref}
 async function fetchAllPendingApprovals(env) {
   const map = {};
-  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=deploy&per_page=50`);
-  const withStatuses = await Promise.allSettled(
-    deployments.map(async d => {
-      const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
-      return { d, status: statuses[0] };
+  const data = await ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`);
+  const waitingRuns = data.workflow_runs || [];
+
+  await Promise.allSettled(
+    waitingRuns.map(async run => {
+      const wf = run.path?.replace(".github/workflows/", "");
+      if (!wf || !APPS.find(a => a.workflow === wf)) return;
+      try {
+        const pending = await ghGet(`repos/${REPO}/actions/runs/${run.id}/pending_deployments`);
+        if (!pending.some(p => p.environment.name === env)) return;
+      } catch { return; }
+      if (!map[wf] || run.created_at > map[wf].createdAt) {
+        map[wf] = { runId: String(run.id), sha: run.head_sha.slice(0, 7), ref: run.head_branch, createdAt: run.created_at };
+      }
     })
   );
-  const waiting = withStatuses
-    .filter(r => r.status === "fulfilled" && r.value.status?.state === "waiting")
-    .map(r => r.value);
-
-  // Resolve current HEAD SHA per unique ref to filter stale deployments
-  const refs = [...new Set(waiting.map(({ d }) => d.ref))];
-  const refHeads = {};
-  await Promise.allSettled(refs.map(async ref => {
-    try {
-      const r = await ghGet(`repos/${REPO}/git/ref/heads/${encodeURIComponent(ref)}`).catch(() =>
-        ghGet(`repos/${REPO}/git/ref/tags/${encodeURIComponent(ref)}`)
-      );
-      refHeads[ref] = r.object.sha;
-    } catch {}
-  }));
-
-  // Process serially — only current-HEAD deployments, skip stale
-  for (const { d, status } of waiting) {
-    try {
-      // Skip if ref no longer exists (deleted branch = stale)
-      const headSha = refHeads[d.ref];
-      if (headSha === undefined) continue;
-
-      // Skip if deployment is older than 7 days
-      const age = Date.now() - new Date(d.created_at).getTime();
-      if (age > 7 * 24 * 60 * 60 * 1000) continue;
-
-      const match = status.log_url?.match(/runs\/(\d+)/);
-      if (!match) continue;
-      const runId = match[1];
-      const run = await ghGet(`repos/${REPO}/actions/runs/${runId}`);
-      const wf = run.path?.replace(".github/workflows/", "");
-      if (!wf) continue;
-
-      // Skip if already successfully deployed for this exact SHA,
-      // OR if a newer SHA has since been deployed successfully for this app
-      const app = APPS.find(a => a.workflow === wf);
-      if (app) {
-        const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app.app)}&per_page=5`);
-        let alreadyDeployed = false;
-        for (const pd of perApp) {
-          const st = await ghGet(`repos/${REPO}/deployments/${pd.id}/statuses?per_page=1`);
-          if (st[0]?.state === "success" && pd.created_at > d.created_at) {
-            // A newer successful deployment exists — this one is obsolete
-            alreadyDeployed = true; break;
-          }
-          if (st[0]?.state === "success" && pd.sha === d.sha) {
-            alreadyDeployed = true; break;
-          }
-        }
-        if (alreadyDeployed) continue;
-      }
-
-      if (!map[wf] || d.created_at > map[wf].createdAt) {
-        map[wf] = { runId, sha: d.sha.slice(0, 7), ref: d.ref, createdAt: d.created_at };
-      }
-    } catch {}
-  }
   return map;
+}
 }
 
 async function approvePendingDeployment(runId, env) {
