@@ -801,11 +801,18 @@ function renderEnvCell(d, env, aheadCount, diffUrl, redeployUrl, pendingRunId, a
 
   // Check if there's an active run for this app right now
   const active = window._activeRunMap?.[workflow];
-  const activeForEnv = active && (
-    (env === "dev1" && active.phase === "in_progress" && active.ref !== "main") ||
-    (env === "dev1" && active.phase === "waiting") ||
-    (env === "prod" && active.phase === "in_progress")
-  );
+  const activeForEnv = active && (() => {
+    if (active.phase === "waiting") {
+      // waiting runs have pending_deployments info stored
+      return active.envs?.includes(env);
+    }
+    if (active.phase === "in_progress") {
+      // Show on dev if deploying a non-main ref, show on prod always for in_progress
+      // We don't know which exact env without fetching jobs, so show on both
+      return true;
+    }
+    return false;
+  })();
 
   if (!d && !pendingRunId && !activeForEnv) return `<td class="cell" data-env="${envLabel}"><span class="version-badge badge-none">no data</span></td>`;
 
@@ -877,12 +884,23 @@ async function load() {
     pendingProdMap = prodPending.status === "fulfilled" ? prodPending.value : {};
     pendingDevMap  = {};
 
-    // Build active run map: workflow -> {phase, ref, sha, runId} for overlay
+    // Build active run map: workflow -> {phase, ref, sha, runId, envs}
     const allActiveRuns = activeRuns.status === "fulfilled" ? activeRuns.value : [];
     window._activeRunMap = {};
     for (const r of allActiveRuns) {
       const wf = r.path?.replace(".github/workflows/", "");
-      if (wf) window._activeRunMap[wf] = { phase: r._phase, ref: r.head_branch, sha: r.head_sha.slice(0,7), runId: r.id };
+      if (!wf) continue;
+      let envs = [];
+      if (r._phase === "waiting") {
+        // For waiting runs we already fetched pending_deployments in fetchAllPendingApprovals
+        // Re-use that data via pendingProdMap
+        envs = [];
+        if (pendingProdMap[wf]?.runId === String(r.id)) envs.push("prod");
+        // Check dev pending too
+        const devPending = await fetchAllPendingApprovals("dev1").catch(() => ({}));
+        if (devPending[wf]?.runId === String(r.id)) envs.push("dev1");
+      }
+      window._activeRunMap[wf] = { phase: r._phase, ref: r.head_branch, sha: r.head_sha.slice(0,7), runId: r.id, envs };
     }
     // Build sha->version map from recent tags
     // Exclude sprint boundary tags (patch == 0, e.g. v2026.21.0) — those are markers not builds
