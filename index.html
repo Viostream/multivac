@@ -671,6 +671,7 @@ function invalidatePendingCache() {
   _pendingCacheTime = {};
   _waitingRunsCache = null;
   _waitingRunsCacheTime = 0;
+  window._depsCache = {};
 }
 }
 
@@ -691,62 +692,62 @@ async function approvePendingDeployment(runId, env) {
   }).then(r => { if (!r.ok) throw new Error(r.status); });
 }
 
+// Fetch all deployment data for an env in one shot, keyed by task (app name)
+async function fetchAllDeployments(env) {
+  const cacheKey = `deps_${env}`;
+  const now = Date.now();
+  if (window._depsCache?.[cacheKey] && now - window._depsCache[`${cacheKey}_time`] < 30_000) {
+    return window._depsCache[cacheKey];
+  }
+  // Fetch up to 100 deployments — covers all apps for this env
+  const deployments = await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=100`);
+  // Group by task, keep latest per task
+  const byTask = {};
+  for (const d of deployments) {
+    if (!byTask[d.task]) byTask[d.task] = d;
+  }
+  window._depsCache = window._depsCache || {};
+  window._depsCache[cacheKey] = byTask;
+  window._depsCache[`${cacheKey}_time`] = now;
+  return byTask;
+}
+
 async function fetchEnv(env, app) {
-  const perApp = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app)}&per_page=10`);
-  const deployments = perApp.length
-    ? perApp
-    : (env === "dev1" ? await ghGet(`repos/${REPO}/deployments?environment=${env}&per_page=10`) : []);
+  const byTask = await fetchAllDeployments(env);
+
+  // Try per-app record first (task=app), fall back to unfiltered for dev1
+  let deployments = [];
+  if (byTask[app]) {
+    deployments = [byTask[app]];
+  } else if (env === "dev1") {
+    // Fall back: find most recent deploy record
+    deployments = Object.values(byTask).sort((a,b) => b.created_at.localeCompare(a.created_at)).slice(0,1);
+  }
   if (!deployments.length) return null;
 
-  // Check most recent deployment first — if it's in_progress/queued show spinner
   const latest = deployments[0];
   const latestStatuses = await ghGet(`repos/${REPO}/deployments/${latest.id}/statuses?per_page=5`);
   const latestState = latestStatuses[0]?.state || "unknown";
 
   if (["in_progress","queued","pending"].includes(latestState)) {
-    // Find version from last successful deployment to show alongside spinner
-    const prevSuccess = deployments.slice(1).find(async d => {
-      const st = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=1`);
-      return st[0]?.state === "success";
-    });
-    return {
-      sha:     latest.sha,
-      sha7:    latest.sha.slice(0, 7),
-      ref:     latest.ref,
-      when:    latest.created_at,
-      state:   "in_progress",
-      version: null,
-      log_url: latestStatuses[0]?.log_url || "",
-    };
+    return { sha: latest.sha, sha7: latest.sha.slice(0,7), ref: latest.ref, when: latest.created_at, state: "in_progress", version: null, log_url: latestStatuses[0]?.log_url || "" };
   }
 
-  // Find most recent success
-  for (const d of deployments) {
-    const statuses = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=10`);
-    const success = statuses.find(s => s.state === "success");
-    if (success) {
-      return {
-        sha:     d.sha,
-        sha7:    d.sha.slice(0, 7),
-        ref:     d.ref,
-        when:    d.created_at,
-        state:   "success",
-        version: success.description?.trim() || null,
-        log_url: success.log_url || "",
-      };
-    }
+  // Find success status
+  const success = latestStatuses.find(s => s.state === "success");
+  if (success) {
+    return { sha: latest.sha, sha7: latest.sha.slice(0,7), ref: latest.ref, when: latest.created_at, state: "success", version: success.description?.trim() || null, log_url: success.log_url || "" };
   }
 
-  // Nothing succeeded yet
-  return {
-    sha:     latest.sha,
-    sha7:    latest.sha.slice(0, 7),
-    ref:     latest.ref,
-    when:    latest.created_at,
-    state:   latestState,
-    version: null,
-    log_url: latestStatuses[0]?.log_url || "",
-  };
+  // Walk back through older deployments for this task
+  const older = await ghGet(`repos/${REPO}/deployments?environment=${env}&task=${encodeURIComponent(app)}&per_page=5`);
+  for (const d of older.slice(1)) {
+    const st = await ghGet(`repos/${REPO}/deployments/${d.id}/statuses?per_page=5`);
+    const s = st.find(s => s.state === "success");
+    if (s) return { sha: d.sha, sha7: d.sha.slice(0,7), ref: d.ref, when: d.created_at, state: "success", version: s.description?.trim() || null, log_url: s.log_url || "" };
+  }
+
+  return { sha: latest.sha, sha7: latest.sha.slice(0,7), ref: latest.ref, when: latest.created_at, state: latestState, version: null, log_url: latestStatuses[0]?.log_url || "" };
 }
 
 // Returns the subset of APPS that have changed files on `branch` vs `main`
