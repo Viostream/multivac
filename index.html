@@ -1142,48 +1142,49 @@ async function loadRerunTab() {
   descEl.textContent = "Looking for cancelled/failed runs…";
   listEl.innerHTML = "";
 
-  // Get all branches, find ones with cancelled/failed runs on current HEAD
-  const branches = await ghGet(`repos/${REPO}/branches?per_page=100`);
-  const candidates = branches.filter(b => b.name !== "main");
+  // Check branches AND recent tags for cancelled/failed runs on current HEAD
+  const [branchesResp, tagsResp] = await Promise.all([
+    ghGet(`repos/${REPO}/branches?per_page=100`),
+    ghGet(`repos/${REPO}/tags?per_page=20`),
+  ]);
 
-  const runs = [];
-  await Promise.allSettled(candidates.map(async b => {
-    const branchRuns = await ghGet(`repos/${REPO}/actions/runs?branch=${encodeURIComponent(b.name)}&per_page=20`);
-    // Group by workflow, keep latest per workflow
+  // Build ref list: branches + recent tags (skip sprint boundary tags patch==0)
+  const refs = [
+    ...branchesResp.filter(b => b.name !== "main").map(b => ({ name: b.name, sha: b.commit.sha, isTag: false })),
+    ...tagsResp.filter(t => !t.name.match(/^v\d+\.\d+\.0$/)).map(t => ({ name: t.name, sha: t.commit.sha, isTag: true })),
+  ];
+
+  const byRef = {};
+  await Promise.allSettled(refs.map(async ref => {
+    const runs = await ghGet(`repos/${REPO}/actions/runs?branch=${encodeURIComponent(ref.name)}&per_page=20`);
     const byWf = {};
-    for (const r of branchRuns.workflow_runs) {
+    for (const r of runs.workflow_runs) {
       const wf = r.path?.replace(".github/workflows/","");
       if (!wf || !APPS.find(a => a.workflow === wf)) continue;
       if (!byWf[wf] || r.created_at > byWf[wf].created_at) byWf[wf] = r;
     }
-    for (const r of Object.values(byWf)) {
-      if (r.head_sha !== b.commit.sha) continue; // stale
-      if (r.conclusion === "cancelled" || r.conclusion === "failure") {
-        runs.push({ branch: b.name, sha: b.commit.sha.slice(0,7), runId: r.id, name: r.name, conclusion: r.conclusion });
-      }
+    const cancelled = Object.values(byWf).filter(r =>
+      r.head_sha === ref.sha &&
+      (r.conclusion === "cancelled" || r.conclusion === "failure")
+    );
+    if (cancelled.length) {
+      byRef[ref.name] = { ref: ref.name, sha: ref.sha.slice(0,7), runs: cancelled, isTag: ref.isTag };
     }
   }));
 
-  if (!runs.length) {
-    descEl.textContent = "No cancelled or failed runs on current branch HEADs.";
+  window._rerunData = {};
+  for (const b of Object.values(byRef)) window._rerunData[b.ref] = b.runs;
+
+  if (!Object.keys(byRef).length) {
+    descEl.textContent = "No cancelled or failed runs found.";
     return;
   }
 
-  // Group by branch
-  const byBranch = {};
-  for (const r of runs) {
-    if (!byBranch[r.branch]) byBranch[r.branch] = { branch: r.branch, sha: r.sha, runs: [] };
-    byBranch[r.branch].runs.push(r);
-  }
-
-  window._rerunData = {};
-  for (const b of Object.values(byBranch)) window._rerunData[b.branch] = b.runs;
-
-  descEl.textContent = "Select a branch to re-run all cancelled/failed jobs:";
-  listEl.innerHTML = Object.values(byBranch).map(b => `
-    <div class="ref-option" onclick="selectRerun('${b.branch}')" id="rerun-${b.branch.replace(/[^a-z0-9]/gi,'_')}">
-      <strong>${b.branch}</strong>
-      <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${b.sha} · ${b.runs.length} app${b.runs.length > 1 ? "s" : ""} ${b.runs[0].conclusion}</span>
+  descEl.textContent = "Select a ref to re-run cancelled/failed jobs:";
+  listEl.innerHTML = Object.values(byRef).map(b => `
+    <div class="ref-option" onclick="selectRerun('${b.ref}')" id="rerun-${b.ref.replace(/[^a-z0-9]/gi,'_')}">
+      <strong>${b.ref}</strong>${b.isTag ? ' <span style="font-size:0.7rem;color:#8b949e">(tag)</span>' : ''}
+      <span style="font-size:0.75rem;color:#8b949e;margin-left:8px">${b.sha} · ${b.runs.length} app${b.runs.length > 1 ? "s" : ""} cancelled</span>
     </div>`).join("");
 }
 
@@ -1279,17 +1280,8 @@ async function confirmDeployModal() {
 
   if (_deployAction.type === "rerun") {
     btn.textContent = "Re-running…";
-    // Find all cancelled/failed run IDs for this branch from the DOM
-    const listEl = document.getElementById("rerun-list");
-    const branch = _deployAction.branch;
-    // Re-fetch to get run IDs
-    const branchRuns = await ghGet(`repos/${REPO}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=20`);
-    const sha = branchRuns.workflow_runs[0]?.head_sha;
-    const toRerun = branchRuns.workflow_runs.filter(r =>
-      r.head_sha === sha &&
-      (r.conclusion === "cancelled" || r.conclusion === "failure") &&
-      APPS.find(a => a.workflow === r.path?.replace(".github/workflows/",""))
-    );
+    const ref = _deployAction.branch;
+    const toRerun = window._rerunData?.[ref] || [];
     const results = await Promise.allSettled(
       toRerun.map(r =>
         fetch(`https://api.github.com/repos/${REPO}/actions/runs/${r.id}/rerun-failed-jobs`, {
