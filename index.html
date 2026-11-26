@@ -617,15 +617,34 @@ function badgeClass(state) {
 
 // Fetch all pending approvals for an env using the Actions runs API — single call, fast.
 // Returns a map of workflow filename -> {runId, sha, ref}
-async function fetchAllPendingApprovals(env) {
-  const map = {};
+// Caches for 30s. Both envs share the same underlying run list fetch.
+let _pendingCache = {};
+let _pendingCacheTime = {};
+let _waitingRunsCache = null;
+let _waitingRunsCacheTime = 0;
+
+async function fetchWaitingRuns() {
+  const now = Date.now();
+  if (_waitingRunsCache && now - _waitingRunsCacheTime < 30_000) return _waitingRunsCache;
   const data = await ghGet(`repos/${REPO}/actions/runs?status=waiting&per_page=50`);
-  const waitingRuns = data.workflow_runs || [];
+  _waitingRunsCache = (data.workflow_runs || []).filter(r => {
+    const wf = r.path?.replace(".github/workflows/", "");
+    return wf && APPS.find(a => a.workflow === wf);
+  });
+  _waitingRunsCacheTime = now;
+  return _waitingRunsCache;
+}
+
+async function fetchAllPendingApprovals(env) {
+  const now = Date.now();
+  if (_pendingCache[env] && now - _pendingCacheTime[env] < 30_000) return _pendingCache[env];
+
+  const map = {};
+  const waitingRuns = await fetchWaitingRuns();
 
   await Promise.allSettled(
     waitingRuns.map(async run => {
-      const wf = run.path?.replace(".github/workflows/", "");
-      if (!wf || !APPS.find(a => a.workflow === wf)) return;
+      const wf = run.path.replace(".github/workflows/", "");
       try {
         const pending = await ghGet(`repos/${REPO}/actions/runs/${run.id}/pending_deployments`);
         if (!pending.some(p => p.environment.name === env)) return;
@@ -635,7 +654,17 @@ async function fetchAllPendingApprovals(env) {
       }
     })
   );
+
+  _pendingCache[env] = map;
+  _pendingCacheTime[env] = now;
   return map;
+}
+
+function invalidatePendingCache() {
+  _pendingCache = {};
+  _pendingCacheTime = {};
+  _waitingRunsCache = null;
+  _waitingRunsCacheTime = 0;
 }
 }
 
@@ -1260,6 +1289,7 @@ async function confirmDeployModal() {
 }
 
 function showResults(results, statusEl, btn) {
+  invalidatePendingCache();
   const values    = results.map(r => r.value || r.reason);
   const failed    = values.filter(v => !v.ok);
   const succeeded = values.filter(v => v.ok);
