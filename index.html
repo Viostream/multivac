@@ -1116,7 +1116,20 @@ async function loadApproveTab(env) {
 function selectApproveRef(env, ref) {
   document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
   document.getElementById(`refopt-${ref.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
-  _deployAction = { type: "approve", env, ref, apps: APPS.filter(a => window._lastPending?.[env]?.[a.workflow]?.ref === ref) };
+  const apps = APPS.filter(a => window._lastPending?.[env]?.[a.workflow]?.ref === ref);
+  _deployAction = { type: "approve", env, ref, apps };
+
+  // Show app list under the selected ref
+  const listId = `approve-${env === "dev1" ? "dev" : "prod"}-list`;
+  const existing = document.getElementById(listId);
+  // Remove any existing app-grid appended earlier
+  existing.querySelectorAll(".app-grid-inline").forEach(el => el.remove());
+  const grid = document.createElement("div");
+  grid.className = "app-grid app-grid-inline";
+  grid.style.marginTop = "8px";
+  grid.innerHTML = apps.map(a => `<div class="app-item">${a.name}</div>`).join("");
+  document.getElementById(`refopt-${ref.replace(/[^a-z0-9]/gi,'_')}`)?.after(grid);
+
   document.getElementById("deploy-modal-confirm").disabled = false;
   document.getElementById("deploy-modal-confirm").textContent = "Approve";
 }
@@ -1163,6 +1176,9 @@ async function loadRerunTab() {
     byBranch[r.branch].runs.push(r);
   }
 
+  window._rerunData = {};
+  for (const b of Object.values(byBranch)) window._rerunData[b.branch] = b.runs;
+
   descEl.textContent = "Select a branch to re-run all cancelled/failed jobs:";
   listEl.innerHTML = Object.values(byBranch).map(b => `
     <div class="ref-option" onclick="selectRerun('${b.branch}')" id="rerun-${b.branch.replace(/[^a-z0-9]/gi,'_')}">
@@ -1173,8 +1189,18 @@ async function loadRerunTab() {
 
 function selectRerun(branch) {
   document.querySelectorAll(".ref-option").forEach(el => el.classList.remove("selected"));
-  document.getElementById(`rerun-${branch.replace(/[^a-z0-9]/gi,'_')}`)?.classList.add("selected");
-  const byBranch = window._rerunData?.[branch];
+  const el = document.getElementById(`rerun-${branch.replace(/[^a-z0-9]/gi,'_')}`);
+  el?.classList.add("selected");
+  // Show which apps will be re-run
+  const data = window._rerunData?.[branch] || [];
+  el?.querySelectorAll(".app-grid-inline").forEach(e => e.remove());
+  if (data.length) {
+    const grid = document.createElement("div");
+    grid.className = "app-grid app-grid-inline";
+    grid.style.marginTop = "8px";
+    grid.innerHTML = data.map(r => `<div class="app-item">${r.name.replace("Viostream.","").replace(".Service","").replace(".Web","")}</div>`).join("");
+    el?.after(grid);
+  }
   _deployAction = { type: "rerun", branch };
   document.getElementById("deploy-modal-confirm").disabled = false;
   document.getElementById("deploy-modal-confirm").textContent = "Re-run";
@@ -1297,8 +1323,9 @@ function showResults(results, statusEl, btn) {
   if (succeeded.length) html += `<span class="ok">✓ ${succeeded.length} succeeded</span><br>`;
   if (failed.length)    html += failed.map(f => `<span class="err">✗ ${f.app}: ${f.err}</span>`).join("<br>");
   statusEl.innerHTML = html;
-  btn.textContent = "Done";
-  if (!failed.length) setTimeout(() => { closeDeployModal(); load(); }, 2000);
+  btn.textContent = failed.length ? "Retry" : "Done";
+  btn.disabled = !!failed.length;
+  if (!failed.length) setTimeout(() => { closeDeployModal(); load(); }, 3000);
 }
 
 // promote button still used for amber cell prod approval shortcut
